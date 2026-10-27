@@ -12,8 +12,10 @@ try:
         QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
         QPushButton, QPlainTextEdit, QProgressBar, QSplitter, QStackedWidget,
         QTableView, QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
-        QDialog, QDialogButtonBox, QFormLayout, QInputDialog
+        QDialog, QDialogButtonBox, QFormLayout, QInputDialog, QScrollArea, QSpinBox, QCheckBox
     )
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
 except ImportError as exc:
     print("Missing dependency:", exc)
     print("Run: pip install PySide6 pandas numpy openpyxl pyarrow")
@@ -147,7 +149,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.2")
+        self.setWindowTitle("Python Data Workbench v0.3")
         self.resize(1450, 900)
         self.history = []
         self.model = DataFrameModel(SAMPLE_DATA)
@@ -237,12 +239,14 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles"), ("Hypothesis tests", "t-test, ANOVA and chi-square"), ("Regression", "Linear and logistic models"), ("Reliability", "Failure and survival analysis"), ("Quality control", "SPC and capability"), ("Experimental design", "Power and sample size")],
-            "Data Science": [("Predict", "Classification and regression"), ("Forecast", "Time-series prediction"), ("Cluster", "Segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Model evaluation", "Cross-validation and metrics"), ("Anomaly detection", "Isolation-based detection")],
+            "Data Science": [("Train model", "Classification or regression with automatic preprocessing"), ("Compare models", "Cross-validated model leaderboard"), ("Forecast", "Time-series prediction"), ("Cluster", "K-means segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Anomaly detection", "Isolation-based detection")],
             "Engineering": [("Units", "Unit conversion"), ("Signal processing", "FFT, filtering and peaks"), ("Numerical methods", "Integration and equation solving"), ("Optimization", "Constrained solving"), ("Simulation", "Monte Carlo analysis"), ("Matrix operations", "Linear algebra")],
         }
         for section, cards in definitions.items():
             self.tabs.addTab(self.make_section(section, cards), section)
         self.tabs.addTab(self.build_data_page(), "Data Grid")
+        self.chart_page = self.build_chart_page()
+        self.tabs.addTab(self.chart_page, "Charts")
         self.python_page = self.build_python_page()
         self.tabs.addTab(self.python_page, "Python Lab")
         return self.tabs
@@ -287,28 +291,162 @@ class Workbench(QMainWindow):
         layout.addWidget(self.table)
         return page
 
+    def build_chart_page(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        top = QHBoxLayout()
+        title = QLabel("Visual Chart Builder")
+        title.setObjectName("pageTitle")
+        self.chart_type = QComboBox(); self.chart_type.addItems(["Line", "Bar", "Scatter", "Histogram", "Box", "Correlation heatmap"])
+        self.chart_x = QComboBox(); self.chart_y = QComboBox()
+        self.chart_group = QComboBox(); self.chart_group.addItem("No grouping")
+        refresh = QPushButton("Create chart"); refresh.setObjectName("primary"); refresh.clicked.connect(self.create_chart)
+        export = QPushButton("Export PNG"); export.clicked.connect(self.export_chart)
+        for label, widget in [("Type", self.chart_type), ("X", self.chart_x), ("Y", self.chart_y), ("Group", self.chart_group)]:
+            top.addWidget(QLabel(label)); top.addWidget(widget)
+        top.addStretch(); top.addWidget(refresh); top.addWidget(export)
+        layout.addLayout(top)
+        self.figure = Figure(figsize=(10, 6), tight_layout=True)
+        self.canvas = FigureCanvas(self.figure)
+        layout.addWidget(self.canvas, 1)
+        self.refresh_chart_columns()
+        return page
+
     def build_python_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
-        intro = QLabel("Python Lab: the active table is available as df")
+        head = QHBoxLayout()
+        intro = QLabel("Python Lab: active table is df")
         intro.setObjectName("pageTitle")
-        layout.addWidget(intro)
-        split = QSplitter(Qt.Vertical)
-        self.editor = QPlainTextEdit()
-        self.editor.setFont(QFont("Consolas", 11))
-        self.editor.setPlainText("# Modify df and click Run\n# Available modules: pd, np\n\ndf['temperature'] = df['temperature'].fillna(df['temperature'].median())\ndf['efficiency'] = (df['output'] / df['pressure']).round(1)\ndf")
-        self.console = QTextEdit()
-        self.console.setReadOnly(True)
-        self.console.setFont(QFont("Consolas", 10))
-        split.addWidget(self.editor)
-        split.addWidget(self.console)
-        split.setSizes([500, 160])
-        layout.addWidget(split)
-        run = QPushButton("Run Python on active DataFrame")
-        run.setObjectName("primary")
-        run.clicked.connect(self.run_python)
-        layout.addWidget(run)
+        self.template_box = QComboBox()
+        self.template_box.addItems(["Choose template", "Clean data", "Group analysis", "Regression", "Chart", "Machine learning"])
+        self.template_box.currentTextChanged.connect(self.load_python_template)
+        run = QPushButton("Run all"); run.setObjectName("primary"); run.clicked.connect(self.run_python)
+        run_selection = QPushButton("Run selection"); run_selection.clicked.connect(self.run_selection)
+        reset = QPushButton("Reset df"); reset.clicked.connect(self.reset_python_df)
+        save_script = QPushButton("Save script"); save_script.clicked.connect(self.save_python_script)
+        head.addWidget(intro); head.addStretch(); head.addWidget(self.template_box); head.addWidget(run_selection); head.addWidget(run); head.addWidget(reset); head.addWidget(save_script)
+        layout.addLayout(head)
+        main = QSplitter()
+        editor_side = QWidget(); editor_layout = QVBoxLayout(editor_side); editor_layout.setContentsMargins(0,0,0,0)
+        self.editor = QPlainTextEdit(); self.editor.setFont(QFont("Consolas", 11)); self.editor.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.editor.setPlainText("# Active visual table is df\nimport pandas as pd\nimport numpy as np\n\ndf['temperature'] = df['temperature'].fillna(df['temperature'].median())\ndf['efficiency'] = (df['output'] / df['pressure']).round(1)\ndf")
+        self.console = QTextEdit(); self.console.setReadOnly(True); self.console.setFont(QFont("Consolas", 10))
+        vertical = QSplitter(Qt.Vertical); vertical.addWidget(self.editor); vertical.addWidget(self.console); vertical.setSizes([520,180])
+        editor_layout.addWidget(vertical)
+        inspector = QWidget(); il = QVBoxLayout(inspector)
+        il.addWidget(QLabel("VARIABLE EXPLORER"))
+        self.variable_list = QListWidget(); il.addWidget(self.variable_list)
+        il.addWidget(QLabel("EXECUTION HISTORY"))
+        self.execution_history = QListWidget(); il.addWidget(self.execution_history)
+        self.auto_return = QCheckBox("Return updated df to grid"); self.auto_return.setChecked(True); il.addWidget(self.auto_return)
+        main.addWidget(editor_side); main.addWidget(inspector); main.setSizes([900,260])
+        layout.addWidget(main,1)
+        self.python_base_df = self.model.dataframe.copy()
+        self.update_variable_explorer({"df": self.model.dataframe})
         return page
+
+    def refresh_chart_columns(self):
+        if not hasattr(self, "chart_x"):
+            return
+        df = self.model.dataframe
+        current_x, current_y = self.chart_x.currentText(), self.chart_y.currentText()
+        self.chart_x.clear(); self.chart_y.clear(); self.chart_group.clear(); self.chart_group.addItem("No grouping")
+        self.chart_x.addItems([str(c) for c in df.columns])
+        self.chart_y.addItems([str(c) for c in df.select_dtypes(include=np.number).columns])
+        self.chart_group.addItems([str(c) for c in df.select_dtypes(exclude=np.number).columns])
+        if current_x in list(df.columns): self.chart_x.setCurrentText(current_x)
+        if current_y in list(df.columns): self.chart_y.setCurrentText(current_y)
+
+    def create_chart(self):
+        df = self.model.dataframe.copy(); kind = self.chart_type.currentText(); x = self.chart_x.currentText(); y = self.chart_y.currentText(); group = self.chart_group.currentText()
+        self.figure.clear(); ax = self.figure.add_subplot(111)
+        try:
+            if kind == "Correlation heatmap":
+                corr = df.select_dtypes(include=np.number).corr()
+                image = ax.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
+                ax.set_xticks(range(len(corr.columns)), corr.columns, rotation=45, ha="right")
+                ax.set_yticks(range(len(corr.columns)), corr.columns)
+                self.figure.colorbar(image, ax=ax, label="Correlation")
+            elif kind == "Histogram":
+                ax.hist(df[y].dropna(), bins=min(20, max(5, int(len(df) ** .5))), color="#2563eb", edgecolor="white")
+                ax.set_xlabel(y); ax.set_ylabel("Frequency")
+            elif kind == "Box":
+                if group != "No grouping":
+                    labels=[]; values=[]
+                    for name, part in df.groupby(group): labels.append(str(name)); values.append(part[y].dropna())
+                    ax.boxplot(values, labels=labels); ax.set_xlabel(group)
+                else: ax.boxplot(df[y].dropna(), labels=[y])
+                ax.set_ylabel(y)
+            else:
+                plot_groups = [(None, df)] if group == "No grouping" else list(df.groupby(group))
+                for name, part in plot_groups:
+                    label = None if name is None else str(name)
+                    if kind == "Line": ax.plot(part[x], part[y], marker="o", label=label)
+                    elif kind == "Bar": ax.bar(part[x].astype(str), part[y], label=label, alpha=.8)
+                    else: ax.scatter(part[x], part[y], label=label, alpha=.8)
+                if group != "No grouping": ax.legend(title=group)
+                ax.set_xlabel(x); ax.set_ylabel(y)
+            ax.set_title(f"{kind}: {y}" if kind != "Correlation heatmap" else "Correlation heatmap")
+            ax.grid(True, alpha=.2); self.canvas.draw(); self.tabs.setCurrentWidget(self.chart_page)
+            self.workflow.addItem(f"{self.workflow.count()+1}. Create {kind.lower()}")
+        except Exception as exc: QMessageBox.critical(self, "Chart failed", str(exc))
+
+    def export_chart(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export chart", "chart.png", "PNG (*.png);;SVG (*.svg);;PDF (*.pdf)")
+        if path: self.figure.savefig(path, dpi=180, bbox_inches="tight")
+
+    def load_python_template(self, name):
+        templates = {
+            "Clean data": "# Clean missing values and duplicates\ndf = df.drop_duplicates().copy()\nfor col in df.select_dtypes(include='number'):\n    df[col] = df[col].fillna(df[col].median())\ndf",
+            "Group analysis": "# Change the columns below\nresult = df.groupby('machine')['output'].agg(['count','mean','sum']).reset_index()\ndf = result\ndf",
+            "Regression": "from sklearn.linear_model import LinearRegression\nfeatures = ['temperature','pressure','vibration']\ntarget = 'output'\ntrain = df[features + [target]].dropna()\nmodel = LinearRegression().fit(train[features], train[target])\ndf.loc[train.index, 'prediction'] = model.predict(train[features])\ndf",
+            "Chart": "import matplotlib.pyplot as plt\ndf.plot(x='time', y='output', kind='line', marker='o')\nplt.tight_layout()\nplt.show()",
+            "Machine learning": "from sklearn.ensemble import RandomForestRegressor\nfeatures = ['temperature','pressure','vibration']\ntarget = 'output'\ntrain = df[features + [target]].dropna()\nmodel = RandomForestRegressor(n_estimators=100, random_state=42)\nmodel.fit(train[features], train[target])\ndf.loc[train.index, 'ml_prediction'] = model.predict(train[features])\ndf"
+        }
+        if name in templates: self.editor.setPlainText(templates[name])
+
+    def execute_python_code(self, code, label):
+        namespace = {"df": self.model.dataframe.copy(), "pd": pd, "np": np}
+        try:
+            import matplotlib.pyplot as plt
+            namespace["plt"] = plt
+            exec(code, {"__builtins__": __builtins__}, namespace)
+            result = namespace.get("df")
+            if self.auto_return.isChecked() and not isinstance(result, pd.DataFrame): raise TypeError("Variable 'df' must remain a pandas DataFrame")
+            if self.auto_return.isChecked():
+                self.push_history(); self.model.set_dataframe(result); self.workflow.addItem(f"{self.workflow.count()+1}. {label}")
+            visible = {k:v for k,v in namespace.items() if not k.startswith("__")}
+            self.update_variable_explorer(visible)
+            preview = result.head(20).to_string() if isinstance(result, pd.DataFrame) else repr(result)
+            self.console.setPlainText(f"Success\n\n{preview}")
+            self.execution_history.insertItem(0, f"Success: {label}")
+        except Exception:
+            self.console.setPlainText(traceback.format_exc()); self.execution_history.insertItem(0, f"Failed: {label}")
+        self.refresh_status()
+
+    def run_selection(self):
+        selected = self.editor.textCursor().selectedText().replace("\u2029", "\n")
+        if not selected.strip(): QMessageBox.information(self, "Run selection", "Select Python code in the editor first."); return
+        self.execute_python_code(selected, "Run Python selection")
+
+    def reset_python_df(self):
+        self.model.set_dataframe(self.python_base_df.copy()); self.console.setPlainText("df reset to the dataset captured when Python Lab opened."); self.refresh_status()
+
+    def save_python_script(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save Python script", "analysis.py", "Python (*.py)")
+        if path: Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
+
+    def update_variable_explorer(self, values):
+        if not hasattr(self, "variable_list"): return
+        self.variable_list.clear()
+        for name, value in values.items():
+            if callable(value): continue
+            if isinstance(value, pd.DataFrame): detail=f"DataFrame {value.shape[0]}x{value.shape[1]}"
+            elif isinstance(value, pd.Series): detail=f"Series {len(value)}"
+            elif isinstance(value, np.ndarray): detail=f"ndarray {value.shape}"
+            else: detail=type(value).__name__
+            self.variable_list.addItem(f"{name}  |  {detail}")
 
     def select_tool(self, name):
         handlers = {
@@ -330,7 +468,8 @@ class Workbench(QMainWindow):
             "Hypothesis tests": self.hypothesis_test,
             "Regression": self.regression,
             "Quality control": self.quality_control,
-            "Predict": self.predict_model,
+            "Train model": self.train_model_dialog,
+            "Compare models": self.compare_models,
             "Forecast": self.forecast,
             "Cluster": self.cluster_data,
             "Anomaly detection": self.ml_anomaly,
@@ -416,19 +555,52 @@ class Workbench(QMainWindow):
         self.tabs.setCurrentWidget(self.python_page)
 
     def run_python(self):
-        self.push_history()
-        namespace = {"df": self.model.dataframe.copy(), "pd": pd, "np": np}
+        self.execute_python_code(self.editor.toPlainText(), "Run Python Lab")
+
+    def train_model_dialog(self):
         try:
-            exec(self.editor.toPlainText(), {"__builtins__": __builtins__}, namespace)
-            result = namespace.get("df")
-            if not isinstance(result, pd.DataFrame):
-                raise TypeError("Variable 'df' must remain a pandas DataFrame")
-            self.model.set_dataframe(result)
-            self.workflow.addItem(f"{self.workflow.count()+1}. Run Python Lab")
-            self.console.setPlainText(f"Success\nRows: {len(result)}\nColumns: {len(result.columns)}\n\n{result.head(20).to_string()}")
-        except Exception:
-            self.console.setPlainText(traceback.format_exc())
-        self.refresh_status()
+            from sklearn.compose import ColumnTransformer
+            from sklearn.pipeline import Pipeline
+            from sklearn.preprocessing import OneHotEncoder, StandardScaler
+            from sklearn.impute import SimpleImputer
+            from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+            from sklearn.model_selection import train_test_split
+            from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score, classification_report
+            target = self.choose_column("Train model - target")
+            if not target: return
+            df = self.model.dataframe.copy(); X = df.drop(columns=[target]); y = df[target]
+            valid = y.notna(); X=X.loc[valid]; y=y.loc[valid]
+            numeric=list(X.select_dtypes(include=np.number).columns); categorical=[c for c in X.columns if c not in numeric]
+            pre=ColumnTransformer([("num",Pipeline([("impute",SimpleImputer(strategy="median")),("scale",StandardScaler())]),numeric),("cat",Pipeline([("impute",SimpleImputer(strategy="most_frequent")),("encode",OneHotEncoder(handle_unknown="ignore"))]),categorical)])
+            classification = y.dtype == object or y.nunique() <= max(10, int(len(y)*.1))
+            estimator = RandomForestClassifier(n_estimators=200,random_state=42) if classification else RandomForestRegressor(n_estimators=200,random_state=42)
+            model=Pipeline([("preprocess",pre),("model",estimator)])
+            Xtr,Xte,ytr,yte=train_test_split(X,y,test_size=.25,random_state=42,stratify=y if classification and y.value_counts().min()>=2 else None)
+            model.fit(Xtr,ytr); pred=model.predict(Xte)
+            if classification: report=f"Accuracy: {accuracy_score(yte,pred):.4f}\n\n{classification_report(yte,pred,zero_division=0)}"
+            else: report=f"R-squared: {r2_score(yte,pred):.4f}\nMAE: {mean_absolute_error(yte,pred):.4f}"
+            df[f"ml_prediction_{target}"]=model.predict(df.drop(columns=[target]))
+            self.apply_dataframe(df,f"Train Random Forest for {target}"); self.console.setPlainText(report); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"Model training failed",str(exc))
+
+    def compare_models(self):
+        try:
+            from sklearn.model_selection import cross_val_score
+            from sklearn.impute import SimpleImputer
+            from sklearn.pipeline import make_pipeline
+            from sklearn.preprocessing import StandardScaler
+            from sklearn.linear_model import LinearRegression, Ridge
+            from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
+            target=self.choose_column("Compare models - numeric target",True)
+            if not target:return
+            df=self.model.dataframe.select_dtypes(include=np.number).dropna(subset=[target]); X=df.drop(columns=[target]); y=df[target]
+            if len(df)<6 or X.shape[1]<1: raise ValueError("At least six rows and one numeric feature are required.")
+            cv=min(5,max(2,len(df)//2)); models={"Linear Regression":LinearRegression(),"Ridge":Ridge(),"Random Forest":RandomForestRegressor(n_estimators=150,random_state=42),"Extra Trees":ExtraTreesRegressor(n_estimators=150,random_state=42)}
+            rows=[]
+            for name,est in models.items():
+                pipe=make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),est); scores=cross_val_score(pipe,X,y,cv=cv,scoring="neg_mean_absolute_error"); rows.append({"model":name,"MAE_mean":-scores.mean(),"MAE_std":scores.std()})
+            result=pd.DataFrame(rows).sort_values("MAE_mean").reset_index(drop=True); self.apply_dataframe(result,f"Compare regression models for {target}")
+        except Exception as exc: QMessageBox.critical(self,"Model comparison failed",str(exc))
 
     def choose_column(self, title, numeric=False):
         df = self.model.dataframe
@@ -685,6 +857,7 @@ class Workbench(QMainWindow):
         self.dataset_size.setText(f"{len(df):,} rows × {len(df.columns)} columns")
         self.quality.setValue(score)
         self.quality_note.setText(f"{missing} missing cells · {df.duplicated().sum()} duplicate rows")
+        self.refresh_chart_columns()
         self.status_label.setText(f"{len(df):,} rows  |  {len(df.columns)} columns  |  Quality {score}%")
 
     def apply_styles(self):
