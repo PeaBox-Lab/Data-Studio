@@ -11,7 +11,8 @@ try:
         QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView,
         QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
         QPushButton, QPlainTextEdit, QProgressBar, QSplitter, QStackedWidget,
-        QTableView, QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget
+        QTableView, QTabWidget, QTextEdit, QToolBar, QVBoxLayout, QWidget,
+        QDialog, QDialogButtonBox, QFormLayout, QInputDialog
     )
 except ImportError as exc:
     print("Missing dependency:", exc)
@@ -146,7 +147,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.1")
+        self.setWindowTitle("Python Data Workbench v0.2")
         self.resize(1450, 900)
         self.history = []
         self.model = DataFrameModel(SAMPLE_DATA)
@@ -320,8 +321,22 @@ class Workbench(QMainWindow):
             "Correlation": self.show_correlation,
             "Outliers": self.detect_outliers,
             "Descriptive statistics": self.show_profile,
-            "Feature engineering": lambda: self.tabs.setCurrentWidget(self.python_page),
+            "Feature engineering": self.feature_engineering,
             "Matrix operations": self.matrix_summary,
+            "Join tables": self.join_tables,
+            "Pivot / reshape": self.pivot_table,
+            "Group analysis": self.group_analysis,
+            "Time patterns": self.time_patterns,
+            "Hypothesis tests": self.hypothesis_test,
+            "Regression": self.regression,
+            "Quality control": self.quality_control,
+            "Predict": self.predict_model,
+            "Forecast": self.forecast,
+            "Cluster": self.cluster_data,
+            "Anomaly detection": self.ml_anomaly,
+            "Signal processing": self.signal_processing,
+            "Optimization": self.optimize_process,
+            "Simulation": self.monte_carlo,
         }
         if name in handlers:
             handlers[name]()
@@ -414,6 +429,213 @@ class Workbench(QMainWindow):
         except Exception:
             self.console.setPlainText(traceback.format_exc())
         self.refresh_status()
+
+    def choose_column(self, title, numeric=False):
+        df = self.model.dataframe
+        columns = list(df.select_dtypes(include=np.number).columns) if numeric else list(df.columns)
+        if not columns:
+            QMessageBox.warning(self, title, "No compatible columns are available.")
+            return None
+        value, ok = QInputDialog.getItem(self, title, "Column", columns, 0, False)
+        return value if ok else None
+
+    def choose_two_numeric(self, title):
+        first = self.choose_column(title + " - X", True)
+        if not first:
+            return None, None
+        second = self.choose_column(title + " - Y", True)
+        return (first, second) if second else (None, None)
+
+    def join_tables(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select table to join", "", "Data files (*.csv *.xlsx *.json *.parquet)")
+        if not path:
+            return
+        try:
+            suffix = Path(path).suffix.lower()
+            other = pd.read_csv(path) if suffix == ".csv" else pd.read_excel(path) if suffix in (".xlsx", ".xls") else pd.read_json(path) if suffix == ".json" else pd.read_parquet(path)
+            common = [c for c in self.model.dataframe.columns if c in other.columns]
+            if not common:
+                raise ValueError("The datasets have no common column for a visual join.")
+            key, ok = QInputDialog.getItem(self, "Join tables", "Join key", common, 0, False)
+            if ok:
+                result = self.model.dataframe.merge(other, on=key, how="left", suffixes=("", "_joined"))
+                self.apply_dataframe(result, f"Left join on {key}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Join failed", str(exc))
+
+    def pivot_table(self):
+        df = self.model.dataframe
+        category = self.choose_column("Pivot - group column")
+        value = self.choose_column("Pivot - value column", True)
+        if category and value:
+            result = df.pivot_table(index=category, values=value, aggfunc=["count", "mean", "sum"]).reset_index()
+            result.columns = ["_".join(str(x) for x in c if x).strip("_") if isinstance(c, tuple) else str(c) for c in result.columns]
+            self.apply_dataframe(result, f"Pivot {value} by {category}")
+
+    def group_analysis(self):
+        category = self.choose_column("Group analysis - category")
+        value = self.choose_column("Group analysis - numeric measure", True)
+        if category and value:
+            result = self.model.dataframe.groupby(category, dropna=False)[value].agg(["count", "mean", "median", "min", "max", "sum"]).reset_index()
+            self.apply_dataframe(result, f"Group {value} by {category}")
+
+    def time_patterns(self):
+        df = self.model.dataframe.copy()
+        time_col = self.choose_column("Time patterns - date/time")
+        value = self.choose_column("Time patterns - numeric measure", True)
+        if time_col and value:
+            df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+            result = df.dropna(subset=[time_col]).set_index(time_col)[value].resample("h").mean().interpolate().to_frame("mean").reset_index()
+            result["rolling_3"] = result["mean"].rolling(3, min_periods=1).mean()
+            self.apply_dataframe(result, f"Hourly time pattern for {value}")
+
+    def hypothesis_test(self):
+        try:
+            from scipy import stats
+            group = self.choose_column("Hypothesis test - group")
+            value = self.choose_column("Hypothesis test - measure", True)
+            if not group or not value:
+                return
+            levels = list(self.model.dataframe[group].dropna().unique())
+            if len(levels) < 2:
+                raise ValueError("The group column needs at least two values.")
+            a = self.model.dataframe.loc[self.model.dataframe[group] == levels[0], value].dropna()
+            b = self.model.dataframe.loc[self.model.dataframe[group] == levels[1], value].dropna()
+            stat, p = stats.ttest_ind(a, b, equal_var=False)
+            self.console.setPlainText(f"Welch two-sample t-test\nMeasure: {value}\nGroups: {levels[0]} vs {levels[1]}\nStatistic: {stat:.5f}\np-value: {p:.6g}\nDecision at 0.05: {'significant' if p < .05 else 'not significant'}")
+            self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc:
+            QMessageBox.critical(self, "Test failed", str(exc))
+
+    def regression(self):
+        try:
+            from scipy import stats
+            x, y = self.choose_two_numeric("Linear regression")
+            if not x:
+                return
+            clean = self.model.dataframe[[x, y]].dropna()
+            fit = stats.linregress(clean[x], clean[y])
+            result = self.model.dataframe.copy()
+            result[f"predicted_{y}"] = fit.intercept + fit.slope * result[x]
+            self.apply_dataframe(result, f"Regression {y} on {x}")
+            self.console.setPlainText(f"Linear regression\n{y} = {fit.intercept:.4f} + {fit.slope:.4f} * {x}\nR-squared: {fit.rvalue**2:.4f}\np-value: {fit.pvalue:.6g}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Regression failed", str(exc))
+
+    def quality_control(self):
+        col = self.choose_column("Quality control", True)
+        if col:
+            df = self.model.dataframe.copy()
+            mean, std = df[col].mean(), df[col].std()
+            df[f"{col}_zscore"] = (df[col] - mean) / std
+            df[f"{col}_outside_3sigma"] = df[f"{col}_zscore"].abs() > 3
+            self.apply_dataframe(df, f"3-sigma control limits for {col}")
+
+    def feature_engineering(self):
+        x, y = self.choose_two_numeric("Feature engineering")
+        if x:
+            df = self.model.dataframe.copy()
+            df[f"{x}_plus_{y}"] = df[x] + df[y]
+            df[f"{x}_div_{y}"] = df[x] / df[y].replace(0, np.nan)
+            df[f"{x}_zscore"] = (df[x] - df[x].mean()) / df[x].std()
+            self.apply_dataframe(df, f"Engineer features from {x} and {y}")
+
+    def predict_model(self):
+        try:
+            from sklearn.ensemble import RandomForestRegressor
+            target = self.choose_column("Prediction target", True)
+            if not target:
+                return
+            df = self.model.dataframe.copy()
+            features = [c for c in df.select_dtypes(include=np.number).columns if c != target]
+            clean = df[features + [target]].dropna()
+            if len(clean) < 4 or not features:
+                raise ValueError("Prediction needs at least four complete rows and one numeric feature.")
+            model = RandomForestRegressor(n_estimators=100, random_state=42).fit(clean[features], clean[target])
+            valid = df[features].notna().all(axis=1)
+            df[f"predicted_{target}"] = np.nan
+            df.loc[valid, f"predicted_{target}"] = model.predict(df.loc[valid, features])
+            self.apply_dataframe(df, f"Random Forest prediction for {target}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Prediction failed", str(exc))
+
+    def forecast(self):
+        value = self.choose_column("Forecast measure", True)
+        if value:
+            series = self.model.dataframe[value].dropna().reset_index(drop=True)
+            window = min(3, max(1, len(series)))
+            prediction = float(series.tail(window).mean())
+            df = self.model.dataframe.copy()
+            row = {c: np.nan for c in df.columns}
+            row[value] = prediction
+            if "status" in row: row["status"] = "Forecast"
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+            self.apply_dataframe(df, f"Moving-average forecast for {value}")
+
+    def cluster_data(self):
+        try:
+            from sklearn.cluster import KMeans
+            df = self.model.dataframe.copy()
+            cols = list(df.select_dtypes(include=np.number).columns)
+            clean = df[cols].fillna(df[cols].median())
+            if len(clean) < 3 or len(cols) < 2:
+                raise ValueError("Clustering needs at least three rows and two numeric columns.")
+            k = min(3, len(clean))
+            df["cluster"] = KMeans(n_clusters=k, random_state=42, n_init=10).fit_predict(clean)
+            self.apply_dataframe(df, f"K-means clustering ({k} clusters)")
+        except Exception as exc:
+            QMessageBox.critical(self, "Clustering failed", str(exc))
+
+    def ml_anomaly(self):
+        try:
+            from sklearn.ensemble import IsolationForest
+            df = self.model.dataframe.copy()
+            cols = list(df.select_dtypes(include=np.number).columns)
+            clean = df[cols].fillna(df[cols].median())
+            df["ml_anomaly"] = IsolationForest(contamination="auto", random_state=42).fit_predict(clean) == -1
+            self.apply_dataframe(df, "Isolation Forest anomalies")
+        except Exception as exc:
+            QMessageBox.critical(self, "Anomaly detection failed", str(exc))
+
+    def signal_processing(self):
+        try:
+            from scipy.signal import savgol_filter
+            col = self.choose_column("Signal processing", True)
+            if not col:
+                return
+            df = self.model.dataframe.copy()
+            values = df[col].interpolate().bfill().ffill()
+            window = min(len(values) if len(values) % 2 else len(values)-1, 5)
+            if window < 3:
+                raise ValueError("At least three readings are required.")
+            df[f"{col}_smoothed"] = savgol_filter(values, window_length=window, polyorder=min(2, window-1))
+            self.apply_dataframe(df, f"Savitzky-Golay smoothing for {col}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Signal processing failed", str(exc))
+
+    def optimize_process(self):
+        try:
+            from scipy.optimize import minimize_scalar
+            x, y = self.choose_two_numeric("Optimize quadratic response")
+            if not x:
+                return
+            clean = self.model.dataframe[[x, y]].dropna()
+            coeff = np.polyfit(clean[x], clean[y], 2)
+            low, high = clean[x].min(), clean[x].max()
+            optimum = minimize_scalar(lambda z: -np.polyval(coeff, z), bounds=(low, high), method="bounded")
+            self.console.setPlainText(f"Quadratic response optimization\nInput: {x}\nResponse: {y}\nBest {x}: {optimum.x:.5f}\nEstimated {y}: {-optimum.fun:.5f}\nObserved range: {low:.5f} to {high:.5f}")
+            self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc:
+            QMessageBox.critical(self, "Optimization failed", str(exc))
+
+    def monte_carlo(self):
+        col = self.choose_column("Monte Carlo simulation", True)
+        if col:
+            values = self.model.dataframe[col].dropna()
+            rng = np.random.default_rng(42)
+            simulations = rng.normal(values.mean(), values.std(ddof=1), 10000)
+            summary = pd.DataFrame({"metric": ["mean", "std", "p05", "p50", "p95"], "value": [simulations.mean(), simulations.std(), *np.quantile(simulations, [.05, .5, .95])]})
+            self.apply_dataframe(summary, f"Monte Carlo simulation for {col}")
 
     def import_data(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import data", "", "Data files (*.csv *.xlsx *.xls *.json *.parquet)")
