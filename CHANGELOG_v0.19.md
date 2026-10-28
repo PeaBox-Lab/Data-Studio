@@ -1,7 +1,10 @@
 # Cumulative Changelog
 
+## v0.19
+Scheduler and Jobs with persistent job definitions, immediate execution, run history, pipeline/model/export/drift jobs and Windows Task Scheduler contract export.
+
 ## v0.18
-Deployment and REST APIs with model-version contracts, FastAPI package generation, health/metadata/prediction endpoints, schema validation, batch scoring and request history.
+Deployment and REST APIs with FastAPI package generation.
 
 ## v0.17
 Model monitoring and drift.

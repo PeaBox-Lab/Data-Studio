@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.18 Deployment APIs and REST")
+        self.setWindowTitle("Python Data Workbench v0.19 Scheduler and Jobs")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -194,6 +194,9 @@ class Workbench(QMainWindow):
         self.drift_thresholds = {"warning": 0.10, "critical": 0.25}
         self.api_deployments = {}
         self.api_request_history = []
+        self.scheduled_jobs = {}
+        self.job_runs = []
+        self.job_counter = 0
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -295,6 +298,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Scheduler and Jobs": [("Create job", "Schedule pipeline, scoring, export or drift"), ("Run job now", "Execute a saved job immediately"), ("Job manager", "Enable, disable and inspect jobs"), ("Job history", "Review status, duration and errors"), ("Export job runner", "Generate headless job contract"), ("Scheduler report", "Consolidate job health")],
             "Deployment and REST": [("Create API deployment", "Package a registered model as a FastAPI service"), ("Export API package", "Generate server, schema and launch files"), ("Test prediction API", "Validate request and response locally"), ("API batch scoring", "Score the active dataset through the API contract"), ("API history", "Review requests, responses and failures"), ("Deployment report", "Inspect endpoints, schemas and model versions")],
             "Model Monitoring": [("Create baseline", "Capture reference distributions and model metrics"), ("Run drift check", "Compare active data with a saved baseline"), ("Performance monitor", "Compare predictions with newly observed outcomes"), ("Drift dashboard", "Visualize PSI, missingness and category changes"), ("Monitoring alerts", "Review warning and critical threshold breaches"), ("Monitoring report", "Consolidate model and data health")],
             "ML Lifecycle": [("Confusion matrix", "Actual versus predicted classification results"), ("ROC and PR curves", "Probability discrimination diagnostics"), ("Calibration curve", "Predicted probability reliability"), ("Learning curve", "Training-size and cross-validation diagnostics"), ("Residual diagnostics", "Regression error and residual plots"), ("Model registry", "Versioned models and prediction history")],
@@ -402,6 +406,132 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def jobs_create(self):
+        kinds = ["Pipeline", "Model batch score", "Dataset export", "Monitoring drift check"]
+        kind, ok = QInputDialog.getItem(self, "Create job", "Job type", kinds, 0, False)
+        if not ok: return
+        name, ok = QInputDialog.getText(self, "Create job", "Job name", text=f"{kind} job")
+        if not ok or not name.strip(): return
+        schedule, ok = QInputDialog.getItem(self, "Create job", "Schedule", ["Manual", "Hourly", "Daily", "Weekly", "Monthly"], 1, False)
+        if not ok: return
+        config = {}
+        if kind == "Pipeline":
+            if not self.pipeline_definitions: QMessageBox.information(self, "Job", "Create a pipeline first."); return
+            value, ok = QInputDialog.getItem(self, "Pipeline job", "Pipeline", list(self.pipeline_definitions), 0, False)
+            if not ok: return
+            config = {"pipeline": value}
+        elif kind == "Model batch score":
+            if not self.api_deployments: QMessageBox.information(self, "Job", "Create an API deployment first."); return
+            value, ok = QInputDialog.getItem(self, "Scoring job", "Deployment", list(self.api_deployments), 0, False)
+            if not ok: return
+            config = {"deployment": value, "dataset": self.active_dataset}
+        elif kind == "Dataset export":
+            fmt, ok = QInputDialog.getItem(self, "Export job", "Format", ["CSV", "Excel", "Parquet"], 0, False)
+            if not ok: return
+            extension = {"CSV":"csv", "Excel":"xlsx", "Parquet":"parquet"}[fmt]
+            path, ok = QInputDialog.getText(self, "Export job", "Output path", text=str(Path.home() / f"{self.active_dataset}_scheduled.{extension}"))
+            if not ok: return
+            config = {"dataset": self.active_dataset, "format": fmt, "path": path}
+        else:
+            if not self.monitoring_baselines: QMessageBox.information(self, "Job", "Create a baseline first."); return
+            value, ok = QInputDialog.getItem(self, "Drift job", "Baseline", list(self.monitoring_baselines), 0, False)
+            if not ok: return
+            config = {"baseline": value, "dataset": self.active_dataset}
+        self.job_counter += 1
+        job_id = f"job_{self.job_counter:04d}"
+        self.scheduled_jobs[job_id] = {"id":job_id, "name":name.strip(), "type":kind, "schedule":schedule, "enabled":True, "config":config, "run_count":0, "last_status":"Never run"}
+        QMessageBox.information(self, "Job created", f"Created {job_id} with {schedule} schedule.")
+
+    def jobs_execute(self, job_id):
+        import time
+        job = self.scheduled_jobs[job_id]; started = time.time(); status = "success"; error = None; details = {}
+        try:
+            if job["type"] == "Pipeline":
+                result, audit = self.execute_pipeline(job["config"]["pipeline"])
+                target = self.unique_dataset_name(job["config"]["pipeline"] + "_job_output")
+                self.datasets[target] = result; details = {"output_dataset":target, "rows":len(result), "steps":len(audit)}
+            elif job["type"] == "Model batch score":
+                deployment = self.api_deployments[job["config"]["deployment"]]; artifact = self.trained_models.get(deployment["model_key"])
+                if artifact is None: raise ValueError("Model artifact unavailable")
+                frame = self.datasets[job["config"]["dataset"]].copy(); missing = [c for c in artifact["features"] if c not in frame]
+                if missing: raise ValueError("Missing features: " + ", ".join(missing))
+                frame[f"prediction_{artifact['target']}"] = artifact["model"].predict(frame[artifact["features"]])
+                target = self.unique_dataset_name(job["config"]["dataset"] + "_scored"); self.datasets[target] = frame; details = {"output_dataset":target, "rows":len(frame)}
+            elif job["type"] == "Dataset export":
+                cfg = job["config"]; frame = self.datasets[cfg["dataset"]]; Path(cfg["path"]).parent.mkdir(parents=True, exist_ok=True)
+                if cfg["format"] == "CSV": frame.to_csv(cfg["path"], index=False)
+                elif cfg["format"] == "Excel": frame.to_excel(cfg["path"], index=False)
+                else: frame.to_parquet(cfg["path"], index=False)
+                details = {"path":cfg["path"], "rows":len(frame)}
+            else:
+                cfg = job["config"]; base = self.monitoring_baselines[cfg["baseline"]]; frame = self.datasets[cfg["dataset"]]; summary = []
+                for column in base["features"]:
+                    if column not in frame.columns: summary.append({"feature":column, "psi":None, "status":"CRITICAL"}); continue
+                    profile = base["profiles"][column]
+                    current = self.monitor_numeric_profile(frame[column], profile["edges"]) if profile["type"] == "numeric" else self.monitor_categorical_profile(frame[column], profile["categories"])
+                    psi = self.monitor_psi(profile["proportions"], current["proportions"])
+                    state = "CRITICAL" if psi >= self.drift_thresholds["critical"] else "WARNING" if psi >= self.drift_thresholds["warning"] else "STABLE"
+                    summary.append({"feature":column, "psi":psi, "status":state})
+                critical = sum(x["status"] == "CRITICAL" for x in summary); warning = sum(x["status"] == "WARNING" for x in summary)
+                self.monitoring_runs.append({"baseline":cfg["baseline"], "dataset":cfg["dataset"], "rows":len(frame), "summary":summary, "critical":critical, "warning":warning}); details = {"critical":critical, "warning":warning}
+        except Exception as exc:
+            status = "failed"; error = str(exc)
+        record = {"job_id":job_id, "job_name":job["name"], "type":job["type"], "status":status, "duration_seconds":round(time.time()-started, 3), "error":error, "details":details}
+        self.job_runs.append(record); job["run_count"] += 1; job["last_status"] = status; job["last_error"] = error
+        self.refresh_dataset_list(); return record
+
+    def jobs_run_now(self):
+        options = [(k,v) for k,v in self.scheduled_jobs.items() if v.get("enabled", True)]
+        if not options: QMessageBox.information(self, "Run job", "No enabled jobs exist."); return
+        labels = [f"{k} | {v['name']} | {v['type']}" for k,v in options]
+        choice, ok = QInputDialog.getItem(self, "Run job now", "Job", labels, 0, False)
+        if ok:
+            result = self.jobs_execute(options[labels.index(choice)][0]); QMessageBox.information(self, "Job finished", f"Status: {result['status']}\nDuration: {result['duration_seconds']} sec" + (f"\nError: {result['error']}" if result['error'] else ""))
+
+    def jobs_manager(self):
+        if not self.scheduled_jobs: QMessageBox.information(self, "Job manager", "No jobs exist."); return
+        dialog = QDialog(self); dialog.setWindowTitle("Job Manager"); dialog.resize(800,500); root = QVBoxLayout(dialog); items = QListWidget(); root.addWidget(items,1); controls = QHBoxLayout(); root.addLayout(controls)
+        def refresh():
+            items.clear()
+            for key,value in self.scheduled_jobs.items(): items.addItem(f"{key} | {'ON' if value.get('enabled') else 'OFF'} | {value['name']} | {value['schedule']} | {value.get('last_status')}")
+        def selected():
+            index = items.currentRow(); return list(self.scheduled_jobs)[index] if index >= 0 else None
+        def run():
+            key = selected()
+            if key: self.jobs_execute(key); refresh()
+        def toggle():
+            key = selected()
+            if key: self.scheduled_jobs[key]["enabled"] = not self.scheduled_jobs[key].get("enabled",True); refresh()
+        def delete():
+            key = selected()
+            if key: del self.scheduled_jobs[key]; refresh()
+        for label, action in [("Run",run),("Enable/Disable",toggle),("Delete",delete)]: button = QPushButton(label); button.clicked.connect(action); controls.addWidget(button)
+        close = QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); refresh(); dialog.exec()
+
+    def jobs_history(self):
+        if not self.job_runs: QMessageBox.information(self, "Job history", "No runs recorded."); return
+        self.console.setPlainText("JOB RUN HISTORY\n" + "="*80 + "\n" + pd.DataFrame(self.job_runs).tail(200).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+
+    def jobs_export_runner(self):
+        if not self.scheduled_jobs: QMessageBox.information(self, "Export runner", "Create a job first."); return
+        keys = list(self.scheduled_jobs); labels = [f"{k} | {self.scheduled_jobs[k]['name']}" for k in keys]; choice, ok = QInputDialog.getItem(self, "Export runner", "Job", labels, 0, False)
+        if not ok: return
+        job_id = keys[labels.index(choice)]; folder = QFileDialog.getExistingDirectory(self, "Export job runner")
+        if not folder: return
+        out = Path(folder) / f"workbench_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
+        (out / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
+        runner = "import json\nfrom pathlib import Path\njob=json.loads((Path(__file__).parent/'job.json').read_text())\nprint(json.dumps(job,indent=2))\nprint('Use Python Data Workbench v0.20 headless runtime to execute this contract.')\n"
+        (out / "run_job.py").write_text(runner, encoding="utf-8"); (out / "run_job.bat").write_text('@echo off\ncd /d "%~dp0"\npython run_job.py\n', encoding="utf-8")
+        schedule = {"Hourly":"/SC HOURLY /MO 1", "Daily":"/SC DAILY /ST 08:00", "Weekly":"/SC WEEKLY /D MON /ST 08:00", "Monthly":"/SC MONTHLY /D 1 /ST 08:00"}.get(job["schedule"])
+        if schedule: (out / "register_windows_task.bat").write_text(f'@echo off\nschtasks /Create /TN "PythonDataWorkbench_{job_id}" {schedule} /TR "\"%~dp0run_job.bat\"" /F\npause\n', encoding="utf-8")
+        QMessageBox.information(self, "Runner exported", f"Exported to:\n{out}")
+
+    def jobs_report(self):
+        lines = ["SCHEDULER AND JOBS REPORT", "="*80, f"Jobs: {len(self.scheduled_jobs)}", f"Runs: {len(self.job_runs)}", f"Failed: {sum(x.get('status') == 'failed' for x in self.job_runs)}", ""]
+        if self.scheduled_jobs: lines.extend(["JOB DEFINITIONS", pd.DataFrame([dict(id=k, **v) for k,v in self.scheduled_jobs.items()]).to_string(index=False), ""])
+        if self.job_runs: lines.extend(["LATEST RUNS", pd.DataFrame(self.job_runs[-50:]).to_string(index=False)])
+        self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
 
     def api_select_registered_model(self):
         if not self.model_registry:
@@ -2257,6 +2387,12 @@ def predict_batch(request: PredictionRequest):
 
     def select_tool(self, name):
         handlers = {
+            "Create job": self.jobs_create,
+            "Run job now": self.jobs_run_now,
+            "Job manager": self.jobs_manager,
+            "Job history": self.jobs_history,
+            "Export job runner": self.jobs_export_runner,
+            "Scheduler report": self.jobs_report,
             "Create API deployment": self.api_create_deployment,
             "Export API package": self.api_export_package,
             "Test prediction API": self.api_test_prediction,
@@ -2755,7 +2891,7 @@ def predict_batch(request: PredictionRequest):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -2804,6 +2940,9 @@ def predict_batch(request: PredictionRequest):
             self.drift_thresholds = payload.get("drift_thresholds", {"warning": 0.10, "critical": 0.25})
             self.api_deployments = payload.get("api_deployments", {})
             self.api_request_history = payload.get("api_request_history", [])
+            self.scheduled_jobs = payload.get("scheduled_jobs", {})
+            self.job_runs = payload.get("job_runs", [])
+            self.job_counter = payload.get("job_counter", 0)
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
