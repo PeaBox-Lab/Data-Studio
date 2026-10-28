@@ -1,5 +1,8 @@
 # Cumulative Changelog
 
+## v0.21
+Automation orchestration with due-job scanning, daemon mode, schedule advancement, dependencies, dependency ordering, retries, blocked-state handling and richer job status.
+
 ## v0.20
 Headless automation runtime with CLI project loading, all four scheduled job types, atomic persistence, project locking, JSON results, exit codes, operational logs, and self-contained exported runners.
 

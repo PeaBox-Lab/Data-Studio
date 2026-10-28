@@ -131,7 +131,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.20 Headless Automation")
+        self.setWindowTitle("Python Data Workbench v0.21 Automation Orchestrator")
         self.resize(1450, 900)
         self.current_project_path = None
         self.history = []
@@ -404,10 +404,36 @@ class Workbench(QMainWindow):
             value, ok = QInputDialog.getItem(self, "Drift job", "Baseline", list(self.monitoring_baselines), 0, False)
             if not ok: return
             config = {"baseline": value, "dataset": self.active_dataset}
+        retries, ok = QInputDialog.getInt(self, "Reliability policy", "Retry attempts after failure", 0, 0, 10, 1)
+        if not ok: return
+        dependency_text = ""
+        if self.scheduled_jobs:
+            dependency_text, ok = QInputDialog.getText(
+                self,
+                "Job dependencies",
+                "Run only after these job IDs succeed (comma-separated; optional)",
+                text="",
+            )
+            if not ok: return
+        dependencies = [item.strip() for item in dependency_text.split(",") if item.strip()]
+        invalid = [item for item in dependencies if item not in self.scheduled_jobs]
+        if invalid:
+            QMessageBox.warning(self, "Job dependencies", "Unknown job IDs: " + ", ".join(invalid))
+            return
         self.job_counter += 1
         job_id = f"job_{self.job_counter:04d}"
-        self.scheduled_jobs[job_id] = {"id":job_id, "name":name.strip(), "type":kind, "schedule":schedule, "enabled":True, "config":config, "run_count":0, "last_status":"Never run"}
-        QMessageBox.information(self, "Job created", f"Created {job_id} with {schedule} schedule.")
+        self.scheduled_jobs[job_id] = {
+            "id":job_id, "name":name.strip(), "type":kind, "schedule":schedule,
+            "enabled":True, "config":config, "run_count":0, "last_status":"Never run",
+            "created_utc":pd.Timestamp.utcnow().isoformat(), "next_run_utc":None,
+            "depends_on":dependencies, "max_retries":retries, "retry_delay_seconds":5,
+        }
+        QMessageBox.information(
+            self,
+            "Job created",
+            f"Created {job_id} with {schedule} schedule.\nRetries: {retries}\n"
+            f"Dependencies: {', '.join(dependencies) if dependencies else 'None'}",
+        )
     def jobs_execute(self, job_id):
         import time
         job = self.scheduled_jobs[job_id]; started = time.time(); status = "success"; error = None; details = {}
@@ -457,7 +483,13 @@ class Workbench(QMainWindow):
         dialog = QDialog(self); dialog.setWindowTitle("Job Manager"); dialog.resize(800,500); root = QVBoxLayout(dialog); items = QListWidget(); root.addWidget(items,1); controls = QHBoxLayout(); root.addLayout(controls)
         def refresh():
             items.clear()
-            for key,value in self.scheduled_jobs.items(): items.addItem(f"{key} | {'ON' if value.get('enabled') else 'OFF'} | {value['name']} | {value['schedule']} | {value.get('last_status')}")
+            for key,value in self.scheduled_jobs.items():
+                dependencies = ",".join(value.get("depends_on", [])) or "-"
+                items.addItem(
+                    f"{key} | {'ON' if value.get('enabled') else 'OFF'} | "
+                    f"{value['name']} | {value['schedule']} | {value.get('last_status')} | "
+                    f"retries={value.get('max_retries', 0)} | deps={dependencies}"
+                )
         def selected():
             index = items.currentRow(); return list(self.scheduled_jobs)[index] if index >= 0 else None
         def run():
@@ -485,7 +517,7 @@ class Workbench(QMainWindow):
         if not folder: return
         out = Path(folder) / f"workbench_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
         (out / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
-        runtime_source = Path(__file__).with_name("workbench_headless_v0.20.py")
+        runtime_source = Path(__file__).with_name("workbench_headless_v0.21.py")
         if not runtime_source.exists():
             QMessageBox.critical(self, "Export runner", f"Headless runtime not found:\n{runtime_source}")
             return
@@ -500,7 +532,7 @@ base = Path(__file__).resolve().parent
 config = json.loads((base / "runner.json").read_text(encoding="utf-8"))
 command = [
     sys.executable,
-    str(base / "workbench_headless_v0.20.py"),
+    str(base / "workbench_headless_v0.21.py"),
     "--project", config["project"],
     "--job-file", str(base / config["job_file"]),
     "--json-output", str(base / "last_run.json"),
@@ -513,14 +545,14 @@ raise SystemExit(subprocess.call(command))
         schedule = {"Hourly":"/SC HOURLY /MO 1", "Daily":"/SC DAILY /ST 08:00", "Weekly":"/SC WEEKLY /D MON /ST 08:00", "Monthly":"/SC MONTHLY /D 1 /ST 08:00"}.get(job["schedule"])
         if schedule: (out / "register_windows_task.bat").write_text(f'@echo off\nschtasks /Create /TN "PythonDataWorkbench_{job_id}" {schedule} /TR "\"%~dp0run_job.bat\"" /F\npause\n', encoding="utf-8")
         (out / "README.txt").write_text(
-            "Python Data Workbench v0.20 headless runner\n\n"
+            "Python Data Workbench v0.21 automation runner\n\n"
             "Run run_job.bat on Windows or run_job.sh on macOS/Linux.\n"
             "The runner loads the saved .pdw project, executes job.json, records history, "
             "persists generated datasets and monitoring results, and writes last_run.json.\n"
             "If the project moves, update the project path in runner.json.\n",
             encoding="utf-8",
         )
-        QMessageBox.information(self, "Runner exported", f"Complete v0.20 headless runner exported to:\n{out}")
+        QMessageBox.information(self, "Runner exported", f"Complete v0.21 automation runner exported to:\n{out}")
     def jobs_report(self):
         lines = ["SCHEDULER AND JOBS REPORT", "="*80, f"Jobs: {len(self.scheduled_jobs)}", f"Runs: {len(self.job_runs)}", f"Failed: {sum(x.get('status') == 'failed' for x in self.job_runs)}", ""]
         if self.scheduled_jobs: lines.extend(["JOB DEFINITIONS", pd.DataFrame([dict(id=k, **v) for k,v in self.scheduled_jobs.items()]).to_string(index=False), ""])
@@ -2702,7 +2734,7 @@ def predict_batch(request: PredictionRequest):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.20", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter}
+            payload = {"version": "0.21", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.current_project_path = str(Path(path).resolve())
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
