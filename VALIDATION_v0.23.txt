@@ -1,9 +1,0 @@
-Python Data Workbench v0.23 validation
-PASS - Desktop compilation
-PASS - Headless compilation
-PASS - v0.22 Guided Workspace retained
-PASS - Workspace Overview present
-PASS - Recent Actions present
-PASS - Focus Mode present
-PASS - Scheduler, API, Monitoring and AutoML functions retained
-PASS - ZIP integrity

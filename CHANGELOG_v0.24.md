@@ -1,10 +1,12 @@
 # Cumulative Changelog
+## v0.24
+Workspace Personalization: theme, density, guidance preferences and F11 Focus Mode shortcut.
 ## v0.23
-Productivity Workspace: Workspace Overview, Recent Actions, Focus Mode and expanded Quick Actions.
+Productivity Workspace with Workspace Overview, Recent Actions and Focus Mode.
 ## v0.22
-Guided Workspace UX, task navigation, Getting Started and Ctrl+K Quick Actions.
+Guided Workspace UX with task navigation, Getting Started and Ctrl+K Quick Actions.
 ## v0.21
-Automation orchestration with due scans, daemon mode, dependencies and retries.
+Automation orchestration.
 ## v0.20
 Headless automation runtime.
 ## v0.19
