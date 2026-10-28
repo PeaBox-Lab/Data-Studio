@@ -1,10 +1,13 @@
 # Cumulative Changelog
 
+## v0.17
+Model monitoring and drift with reference baselines, PSI, missingness monitoring, performance tracking, alert thresholds, drift dashboard and monitoring reports.
+
 ## v0.16
-ML explainability and lifecycle: confusion matrices, calibration, learning curves, regression residual diagnostics, local sensitivity explanations, versioned model registry and prediction history.
+ML lifecycle and explainability with confusion matrices, ROC/PR, calibration, learning curves, residual diagnostics and model registry.
 
 ## v0.15
-AutoML Studio with problem detection, cross-validation, model comparison, ROC curves and feature importance.
+AutoML Studio with cross-validation, tuning, holdout evaluation and feature importance.
 
 ## v0.14
 Engineering and Scientific Analytics Studio.
@@ -19,10 +22,10 @@ Business analytics packs.
 Dashboard Designer 2.0.
 
 ## v0.10
-Large-data DuckDB sources and engine-routed pipelines.
+Large-data DuckDB sources and routed pipelines.
 
 ## v0.9
-Parameterized reproducible Pipeline Studio.
+Parameterized Pipeline Studio.
 
 ## v0.8
 Semantic model, relationships and measures.
@@ -31,7 +34,7 @@ Semantic model, relationships and measures.
 Hybrid pandas, DuckDB and optional PySpark compute.
 
 ## v0.6
-SQL, dashboards, KPIs and reusable workflows.
+SQL, dashboards, KPIs and workflows.
 
 ## v0.5
 Analytics workspace and executive dashboards.
@@ -40,7 +43,7 @@ Analytics workspace and executive dashboards.
 Multi-dataset projects and model lifecycle foundation.
 
 ## v0.3
-Machine learning, charts and Python Lab expansion.
+Machine learning, charts and Python Lab.
 
 ## v0.2
 Statistics, science and engineering foundations.
