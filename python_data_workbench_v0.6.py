@@ -2,6 +2,7 @@ import sys
 import traceback
 import json
 import pickle
+import re
 from pathlib import Path
 
 try:
@@ -151,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.5 Analytics Platform")
+        self.setWindowTitle("Python Data Workbench v0.6 Analytics Platform")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -160,6 +161,9 @@ class Workbench(QMainWindow):
         self.trained_models = {}
         self.metric_definitions = []
         self.dashboard_cards = []
+        self.saved_pipelines = {}
+        self.kpi_definitions = []
+        self.dashboard_filters = {}
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -182,6 +186,9 @@ class Workbench(QMainWindow):
         pipeline_action = QAction("Export workflow", self)
         pipeline_action.triggered.connect(self.export_pipeline)
         toolbar.addAction(pipeline_action)
+        sql_action = QAction("SQL Workspace", self)
+        sql_action.triggered.connect(lambda: self.tabs.setCurrentWidget(self.sql_page))
+        toolbar.addAction(sql_action)
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -253,7 +260,9 @@ class Workbench(QMainWindow):
         definitions = {
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
-            "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Segment analysis", "Compare performance across categories"), ("Trend analysis", "Time trends, growth and moving averages"), ("Pareto analysis", "Rank contributors and cumulative share"), ("Cohort table", "Cross-tab two business dimensions"), ("Executive summary", "Generate a concise analytical narrative")],
+            "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Business Analysis": [("Segment analysis", "Compare performance across categories"), ("Trend analysis", "Time trends, growth and moving averages"), ("Pareto analysis", "Rank contributors and cumulative share"), ("Cohort table", "Cross-tab two business dimensions"), ("Executive summary", "Generate a concise analytical narrative"), ("KPI summary", "Refresh dashboard metrics")],
+            "Statistics": [("Descriptive statistics", "Mean, spread and percentiles")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles"), ("Hypothesis tests", "t-test, ANOVA and chi-square"), ("Regression", "Linear and logistic models"), ("Reliability", "Failure and survival analysis"), ("Quality control", "SPC and capability"), ("Experimental design", "Power and sample size")],
             "Data Science": [("Train model", "Classification or regression with automatic preprocessing"), ("Compare models", "Cross-validated model leaderboard"), ("Forecast", "Time-series prediction"), ("Cluster", "K-means segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Anomaly detection", "Isolation-based detection"), ("Save model", "Persist a trained model artifact"), ("Batch predict", "Apply saved model to another dataset")],
             "Engineering": [("Units", "Unit conversion"), ("Signal processing", "FFT, filtering and peaks"), ("Numerical methods", "Integration and equation solving"), ("Optimization", "Constrained solving"), ("Simulation", "Monte Carlo analysis"), ("Matrix operations", "Linear algebra")],
@@ -264,6 +273,8 @@ class Workbench(QMainWindow):
         self.tabs.addTab(self.build_data_page(), "Data Grid")
         self.chart_page = self.build_chart_page()
         self.tabs.addTab(self.chart_page, "Charts")
+        self.sql_page = self.build_sql_page()
+        self.tabs.addTab(self.sql_page, "SQL")
         self.python_page = self.build_python_page()
         self.tabs.addTab(self.python_page, "Python Lab")
         return self.tabs
@@ -286,11 +297,71 @@ class Workbench(QMainWindow):
         layout.addStretch()
         return page
 
+    def define_kpi(self):
+        df=self.model.dataframe
+        numeric=list(df.select_dtypes(include=np.number).columns)
+        if not numeric: QMessageBox.warning(self,"Define KPI","No numeric columns available."); return
+        name,ok=QInputDialog.getText(self,"Define KPI","KPI name",text=f"Total {numeric[0]}")
+        if not ok or not name.strip():return
+        column,ok=QInputDialog.getItem(self,"Define KPI","Measure column",numeric,0,False)
+        if not ok:return
+        agg,ok=QInputDialog.getItem(self,"Define KPI","Aggregation",["sum","mean","median","min","max","count","nunique"],0,False)
+        if not ok:return
+        fmt,ok=QInputDialog.getItem(self,"Define KPI","Display format",["number","integer","percent","currency"],0,False)
+        if not ok:return
+        definition={"name":name.strip(),"column":column,"aggregation":agg,"format":fmt,"dataset":self.active_dataset}; self.kpi_definitions=[k for k in self.kpi_definitions if k["name"]!=definition["name"]]; self.kpi_definitions.append(definition); self.refresh_dashboard()
+
+    def calculate_kpi(self,definition,df):
+        col=definition["column"]; agg=definition["aggregation"]
+        if col not in df.columns:return None
+        series=df[col]; value=series.nunique() if agg=="nunique" else getattr(series,agg)()
+        fmt=definition.get("format","number")
+        if fmt=="integer":return f"{value:,.0f}"
+        if fmt=="percent":return f"{value:.1%}"
+        if fmt=="currency":return f"₹{value:,.2f}"
+        return f"{value:,.2f}" if isinstance(value,(int,float,np.number)) else str(value)
+
+    def save_pipeline_definition(self):
+        if not self.pipeline_steps: QMessageBox.information(self,"Save pipeline","No workflow steps are available yet."); return
+        name,ok=QInputDialog.getText(self,"Save pipeline","Pipeline name",text="Analysis pipeline")
+        if ok and name.strip(): self.saved_pipelines[name.strip()]=[dict(x) for x in self.pipeline_steps]; QMessageBox.information(self,"Pipeline saved",f"Saved {len(self.pipeline_steps)} workflow steps as '{name.strip()}'.")
+
+    def run_saved_pipeline(self):
+        if not self.saved_pipelines: QMessageBox.information(self,"Run pipeline","No saved pipelines yet."); return
+        name,ok=QInputDialog.getItem(self,"Run pipeline","Pipeline",list(self.saved_pipelines),0,False)
+        if not ok:return
+        runnable={"Fill missing values":self.fill_missing,"Remove duplicates":self.remove_duplicates,"Infer data types":self.infer_types,"Clean text":self.clean_text,"Detect IQR outliers":self.detect_outliers}
+        executed=0; skipped=[]
+        for item in self.saved_pipelines[name]:
+            step=item.get("step",""); fn=runnable.get(step)
+            if fn: fn(); executed+=1
+            else: skipped.append(step)
+        QMessageBox.information(self,"Pipeline complete",f"Executed {executed} reusable steps. Skipped {len(skipped)} parameterized or unsupported historical steps." + ("\n\nSkipped: " + ", ".join(skipped[:8]) if skipped else ""))
+
+    def open_dashboard_designer(self):
+        dialog=QDialog(self); dialog.setWindowTitle("Dashboard Designer"); dialog.resize(560,420); form=QFormLayout(dialog)
+        dimension=QComboBox(); dimension.addItem("No filter"); dimension.addItems([str(c) for c in self.model.dataframe.columns]); form.addRow("Dashboard filter",dimension)
+        chart=QComboBox(); chart.addItems(["Histogram","Bar","Line","Scatter"]); form.addRow("Primary chart",chart)
+        kpis=QListWidget();
+        for definition in self.kpi_definitions:
+            item=QListWidgetItem(definition["name"]); item.setCheckState(Qt.Checked); kpis.addItem(item)
+        form.addRow("KPI cards",kpis)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); form.addRow(buttons)
+        def save_design():
+            self.dashboard_filters={"column":dimension.currentText(),"value":None}; self.dashboard_cards=[{"type":"chart","chart":chart.currentText()}]+[{"type":"kpi","name":kpis.item(i).text()} for i in range(kpis.count()) if kpis.item(i).checkState()==Qt.Checked]; dialog.accept(); self.refresh_dashboard(); self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
+        buttons.accepted.connect(save_design); buttons.rejected.connect(dialog.reject); dialog.exec()
+
+    def dashboard_filtered_df(self):
+        df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
+        if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
+        return df
+
     def build_dashboard_page(self):
         page = QWidget(); outer = QVBoxLayout(page)
         top = QHBoxLayout(); title = QLabel("Analytics Dashboard"); title.setObjectName("pageTitle")
         refresh = QPushButton("Refresh dashboard"); refresh.setObjectName("primary"); refresh.clicked.connect(self.refresh_dashboard)
-        top.addWidget(title); top.addStretch(); top.addWidget(refresh); outer.addLayout(top)
+        self.dashboard_filter_value=QComboBox(); self.dashboard_filter_value.currentTextChanged.connect(self.apply_dashboard_filter_value)
+        top.addWidget(title); top.addStretch(); top.addWidget(QLabel("Filter")); top.addWidget(self.dashboard_filter_value); top.addWidget(refresh); outer.addLayout(top)
         self.dashboard_summary = QLabel("Select or import a dataset to generate analytics."); self.dashboard_summary.setWordWrap(True); self.dashboard_summary.setObjectName("muted"); outer.addWidget(self.dashboard_summary)
         self.kpi_strip = QHBoxLayout(); outer.addLayout(self.kpi_strip)
         split = QSplitter()
@@ -307,12 +378,21 @@ class Workbench(QMainWindow):
 
     def refresh_dashboard(self):
         if not hasattr(self, "kpi_strip"): return
-        df=self.model.dataframe
+        df=self.dashboard_filtered_df()
         self.clear_layout(self.kpi_strip)
+        if hasattr(self,"dashboard_filter_value"):
+            col=self.dashboard_filters.get("column") if self.dashboard_filters else None; current=self.dashboard_filter_value.currentText(); self.dashboard_filter_value.blockSignals(True); self.dashboard_filter_value.clear(); self.dashboard_filter_value.addItem("All")
+            if col and col!="No filter" and col in self.model.dataframe.columns:self.dashboard_filter_value.addItems([str(x) for x in self.model.dataframe[col].dropna().unique()[:200]])
+            if current:self.dashboard_filter_value.setCurrentText(current)
+            self.dashboard_filter_value.blockSignals(False)
         numeric=list(df.select_dtypes(include=np.number).columns)
         metrics=[("Rows", f"{len(df):,}"),("Columns",str(len(df.columns))),("Missing",f"{int(df.isna().sum().sum()):,}"),("Duplicates",f"{int(df.duplicated().sum()):,}")]
         for col in numeric[:2]: metrics.append((f"Avg {col}", f"{df[col].mean():,.2f}"))
-        for label,value in metrics[:6]:
+        for definition in self.kpi_definitions:
+            if definition.get("dataset")==self.active_dataset:
+                value=self.calculate_kpi(definition,df)
+                if value is not None: metrics.append((definition["name"],value))
+        for label,value in metrics[:8]:
             card=QFrame(); card.setObjectName("datasetCard"); cl=QVBoxLayout(card); a=QLabel(label); a.setObjectName("muted"); b=QLabel(value); b.setStyleSheet("font-size: 20px; font-weight: 700; color:#1d4ed8"); cl.addWidget(a); cl.addWidget(b); self.kpi_strip.addWidget(card)
         self.dashboard_summary.setText(f"Active dataset: {self.active_dataset}. The dashboard uses the same live DataFrame as visual tools and Python Lab.")
         if numeric:
@@ -320,6 +400,11 @@ class Workbench(QMainWindow):
             self.dashboard_figure.clear(); ax=self.dashboard_figure.add_subplot(111); col=numeric[0]; clean=df[col].dropna(); ax.hist(clean,bins=min(20,max(5,int(max(1,len(clean))**.5))),color="#2563eb",edgecolor="white"); ax.set_title(f"Distribution of {col}"); ax.set_xlabel(col); ax.set_ylabel("Frequency"); ax.grid(True,alpha=.2); self.dashboard_canvas.draw()
         else: self.dashboard_table_model.set_dataframe(pd.DataFrame({"message":["No numeric columns"]}))
         self.dashboard_insights.setPlainText(self.make_executive_summary())
+
+    def apply_dashboard_filter_value(self,value):
+        if not self.dashboard_filters:return
+        self.dashboard_filters["value"]=None if value in ("","All") else value
+        self.refresh_dashboard()
 
     def make_executive_summary(self):
         df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns); cats=list(df.select_dtypes(exclude=np.number).columns); lines=[f"Dataset {self.active_dataset} contains {len(df):,} rows and {len(df.columns)} columns.",f"Data quality: {int(df.isna().sum().sum())} missing cells and {int(df.duplicated().sum())} duplicate rows."]
@@ -380,6 +465,47 @@ class Workbench(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
         return page
+
+    def build_sql_page(self):
+        page=QWidget(); layout=QVBoxLayout(page)
+        head=QHBoxLayout(); title=QLabel("DuckDB SQL Workspace"); title.setObjectName("pageTitle")
+        self.sql_tables=QComboBox(); self.sql_tables.currentTextChanged.connect(self.insert_sql_table)
+        run=QPushButton("Run SQL"); run.setObjectName("primary"); run.clicked.connect(self.run_sql)
+        save=QPushButton("Save result as dataset"); save.clicked.connect(self.save_sql_result)
+        head.addWidget(title); head.addStretch(); head.addWidget(QLabel("Tables")); head.addWidget(self.sql_tables); head.addWidget(run); head.addWidget(save); layout.addLayout(head)
+        split=QSplitter(Qt.Vertical)
+        self.sql_editor=QPlainTextEdit(); self.sql_editor.setFont(QFont("Consolas",11)); self.sql_editor.setPlainText('SELECT * FROM "sensor_readings" LIMIT 100;')
+        self.sql_result_model=DataFrameModel(pd.DataFrame()); self.sql_result_table=QTableView(); self.sql_result_table.setModel(self.sql_result_model); self.sql_result_table.setSortingEnabled(True)
+        split.addWidget(self.sql_editor); split.addWidget(self.sql_result_table); split.setSizes([220,480]); layout.addWidget(split,1)
+        self.sql_status=QLabel("DuckDB queries can reference every project dataset by its dataset name."); self.sql_status.setObjectName("muted"); layout.addWidget(self.sql_status)
+        self.last_sql_result=pd.DataFrame(); self.refresh_sql_tables(); return page
+
+    def refresh_sql_tables(self):
+        if not hasattr(self,"sql_tables"): return
+        current=self.sql_tables.currentText(); self.sql_tables.blockSignals(True); self.sql_tables.clear(); self.sql_tables.addItems(list(self.datasets));
+        if current in self.datasets:self.sql_tables.setCurrentText(current)
+        self.sql_tables.blockSignals(False)
+
+    def insert_sql_table(self,name):
+        if name and hasattr(self,"sql_editor") and not self.sql_editor.toPlainText().strip(): self.sql_editor.setPlainText(f'SELECT * FROM "{name}" LIMIT 100;')
+
+    def run_sql(self):
+        try:
+            import duckdb
+            con=duckdb.connect(database=":memory:")
+            for name,df in self.datasets.items():
+                safe=re.sub(r"[^A-Za-z0-9_]","_",name); con.register(safe,df)
+            query=self.sql_editor.toPlainText().strip()
+            self.last_sql_result=con.execute(query).fetchdf(); self.sql_result_model.set_dataframe(self.last_sql_result)
+            self.sql_status.setText(f"Query complete: {len(self.last_sql_result):,} rows × {len(self.last_sql_result.columns)} columns")
+            self.workflow.addItem(f"{self.workflow.count()+1}. Run DuckDB SQL")
+        except Exception as exc: self.sql_status.setText(f"SQL error: {exc}")
+
+    def save_sql_result(self):
+        if self.last_sql_result is None or self.last_sql_result.empty: QMessageBox.information(self,"SQL result","Run a query that returns rows first."); return
+        name,ok=QInputDialog.getText(self,"Save SQL result","Dataset name",text="sql_result")
+        if ok and name.strip():
+            name=self.unique_dataset_name(name.strip()); self.datasets[name]=self.last_sql_result.copy(); self.active_dataset=name; self.model.set_dataframe(self.datasets[name]); self.refresh_dataset_list(select=name); self.refresh_sql_tables(); self.refresh_status()
 
     def build_chart_page(self):
         page = QWidget()
@@ -541,6 +667,11 @@ class Workbench(QMainWindow):
     def select_tool(self, name):
         handlers = {
             "KPI summary": self.kpi_summary,
+            "Define KPI": self.define_kpi,
+            "Save pipeline": self.save_pipeline_definition,
+            "Run pipeline": self.run_saved_pipeline,
+            "Dashboard designer": self.open_dashboard_designer,
+            "SQL analysis": lambda: self.tabs.setCurrentWidget(self.sql_page),
             "Segment analysis": self.segment_analysis,
             "Trend analysis": self.trend_analysis,
             "Pareto analysis": self.pareto_analysis,
@@ -938,6 +1069,7 @@ class Workbench(QMainWindow):
         self.active_dataset = name
         self.model.set_dataframe(self.datasets[name])
         self.python_base_df = self.model.dataframe.copy()
+        self.refresh_sql_tables()
         self.refresh_status()
 
     def remove_dataset(self):
@@ -957,7 +1089,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -975,11 +1107,14 @@ class Workbench(QMainWindow):
             self.trained_models = payload.get("trained_models", {})
             self.metric_definitions = payload.get("metric_definitions", [])
             self.dashboard_cards = payload.get("dashboard_cards", [])
+            self.saved_pipelines = payload.get("saved_pipelines", {})
+            self.kpi_definitions = payload.get("kpi_definitions", [])
+            self.dashboard_filters = payload.get("dashboard_filters", {})
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
             self.workflow.clear()
             for i, step in enumerate(self.pipeline_steps, 1): self.workflow.addItem(f"{i}. [{step.get('dataset','')}] {step.get('step','')}")
-            self.refresh_dataset_list(); self.refresh_status()
+            self.refresh_dataset_list(); self.refresh_sql_tables(); self.refresh_status()
         except Exception as exc: QMessageBox.critical(self, "Open project failed", str(exc))
 
     def save_trained_model(self):
@@ -1025,6 +1160,7 @@ class Workbench(QMainWindow):
             self.active_dataset = name
             self.model.set_dataframe(df)
             self.refresh_dataset_list(select=name)
+            self.refresh_sql_tables()
             self.workflow.addItem(f"{self.workflow.count()+1}. Import {name}")
             self.pipeline_steps.append({"dataset": name, "step": "Import data"})
             self.tabs.setCurrentWidget(self.data_page())
