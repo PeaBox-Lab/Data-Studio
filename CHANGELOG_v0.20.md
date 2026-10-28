@@ -1,5 +1,8 @@
 # Cumulative Changelog
 
+## v0.20
+Headless automation runtime with CLI project loading, all four scheduled job types, atomic persistence, project locking, JSON results, exit codes, operational logs, and self-contained exported runners.
+
 ## v0.19
 Scheduler and Jobs with persistent job definitions, immediate execution, run history, pipeline/model/export/drift jobs and Windows Task Scheduler contract export.
 

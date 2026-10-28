@@ -3,8 +3,8 @@ import traceback
 import json
 import pickle
 import re
+import shutil
 from pathlib import Path
-
 try:
     import pandas as pd
     import numpy as np
@@ -23,8 +23,6 @@ except ImportError as exc:
     print("Missing dependency:", exc)
     print("Run: pip install PySide6 pandas numpy openpyxl pyarrow")
     raise
-
-
 SAMPLE_DATA = pd.DataFrame({
     "time": ["2026-10-01 08:00", "2026-10-01 09:00", "2026-10-01 10:00", "2026-10-01 11:00", "2026-10-01 12:00", "2026-10-01 13:00"],
     "machine": ["M-101", "M-102", "M-103", "M-101", "M-104", "M-102"],
@@ -34,27 +32,21 @@ SAMPLE_DATA = pd.DataFrame({
     "output": [1180, 1042, 1158, 1204, 906, 1098],
     "status": ["Normal", "Review", "Missing", "Normal", "Anomaly", "Normal"],
 })
-
-
 class DataFrameModel(QAbstractTableModel):
     changed = Signal()
-
     def __init__(self, dataframe=None):
         super().__init__()
         self._df = dataframe.copy() if dataframe is not None else pd.DataFrame()
         self._visible_rows = list(range(len(self._df)))
-
     @property
     def dataframe(self):
         return self._df
-
     def set_dataframe(self, dataframe):
         self.beginResetModel()
         self._df = dataframe.copy()
         self._visible_rows = list(range(len(self._df)))
         self.endResetModel()
         self.changed.emit()
-
     def set_filter(self, text):
         self.beginResetModel()
         if not text.strip():
@@ -66,13 +58,10 @@ class DataFrameModel(QAbstractTableModel):
                 if any(needle in str(value).lower() for value in row.values)
             ]
         self.endResetModel()
-
     def rowCount(self, parent=QModelIndex()):
         return len(self._visible_rows)
-
     def columnCount(self, parent=QModelIndex()):
         return len(self._df.columns)
-
     def data(self, index, role=Qt.DisplayRole):
         if not index.isValid():
             return None
@@ -91,7 +80,6 @@ class DataFrameModel(QAbstractTableModel):
         if role == Qt.TextAlignmentRole and pd.api.types.is_numeric_dtype(self._df[column]):
             return Qt.AlignRight | Qt.AlignVCenter
         return None
-
     def setData(self, index, value, role=Qt.EditRole):
         if role != Qt.EditRole or not index.isValid():
             return False
@@ -106,15 +94,12 @@ class DataFrameModel(QAbstractTableModel):
             return True
         except Exception:
             return False
-
     def flags(self, index):
         return super().flags(index) | Qt.ItemIsEditable | Qt.ItemIsSelectable | Qt.ItemIsEnabled
-
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role != Qt.DisplayRole:
             return None
         return str(self._df.columns[section]) if orientation == Qt.Horizontal else str(section + 1)
-
     def sort(self, column, order):
         if self._df.empty:
             return
@@ -124,11 +109,8 @@ class DataFrameModel(QAbstractTableModel):
         self._visible_rows = list(range(len(self._df)))
         self.layoutChanged.emit()
         self.changed.emit()
-
-
 class ToolCard(QFrame):
     clicked = Signal(str)
-
     def __init__(self, title, description):
         super().__init__()
         self.title = title
@@ -143,17 +125,15 @@ class ToolCard(QFrame):
         desc.setObjectName("muted")
         layout.addWidget(name)
         layout.addWidget(desc)
-
     def mousePressEvent(self, event):
         self.clicked.emit(self.title)
         super().mousePressEvent(event)
-
-
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.19 Scheduler and Jobs")
+        self.setWindowTitle("Python Data Workbench v0.20 Headless Automation")
         self.resize(1450, 900)
+        self.current_project_path = None
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
         self.active_dataset = "sensor_readings"
@@ -203,7 +183,6 @@ class Workbench(QMainWindow):
         self.apply_styles()
         self.refresh_dataset_list()
         self.refresh_status()
-
     def build_ui(self):
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
@@ -222,13 +201,11 @@ class Workbench(QMainWindow):
         sql_action = QAction("SQL Workspace", self)
         sql_action.triggered.connect(lambda: self.tabs.setCurrentWidget(self.sql_page))
         toolbar.addAction(sql_action)
-
         central = QWidget()
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self.setCentralWidget(central)
-
         header = QFrame()
         header.setObjectName("header")
         hl = QHBoxLayout(header)
@@ -251,13 +228,11 @@ class Workbench(QMainWindow):
         self.status_label = QLabel()
         hl.addWidget(self.status_label)
         root.addWidget(header)
-
         splitter = QSplitter()
         splitter.addWidget(self.build_project_panel())
         splitter.addWidget(self.build_workspace())
         splitter.setSizes([235, 1215])
         root.addWidget(splitter, 1)
-
     def build_project_panel(self):
         panel = QFrame()
         panel.setObjectName("sidebar")
@@ -290,7 +265,6 @@ class Workbench(QMainWindow):
         self.workflow.addItems(["1. Import sample data", "2. Profile dataset"])
         layout.addWidget(self.workflow, 1)
         return panel
-
     def build_workspace(self):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
@@ -329,7 +303,6 @@ class Workbench(QMainWindow):
         self.python_page = self.build_python_page()
         self.tabs.addTab(self.python_page, "Python Lab")
         return self.tabs
-
     def make_section(self, title, cards):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -347,7 +320,6 @@ class Workbench(QMainWindow):
         layout.addLayout(grid_row)
         layout.addStretch()
         return page
-
     def define_kpi(self):
         df=self.model.dataframe
         numeric=list(df.select_dtypes(include=np.number).columns)
@@ -361,7 +333,6 @@ class Workbench(QMainWindow):
         fmt,ok=QInputDialog.getItem(self,"Define KPI","Display format",["number","integer","percent","currency"],0,False)
         if not ok:return
         definition={"name":name.strip(),"column":column,"aggregation":agg,"format":fmt,"dataset":self.active_dataset}; self.kpi_definitions=[k for k in self.kpi_definitions if k["name"]!=definition["name"]]; self.kpi_definitions.append(definition); self.refresh_dashboard()
-
     def calculate_kpi(self,definition,df):
         col=definition["column"]; agg=definition["aggregation"]
         if col not in df.columns:return None
@@ -371,12 +342,10 @@ class Workbench(QMainWindow):
         if fmt=="percent":return f"{value:.1%}"
         if fmt=="currency":return f"₹{value:,.2f}"
         return f"{value:,.2f}" if isinstance(value,(int,float,np.number)) else str(value)
-
     def save_pipeline_definition(self):
         if not self.pipeline_steps: QMessageBox.information(self,"Save pipeline","No workflow steps are available yet."); return
         name,ok=QInputDialog.getText(self,"Save pipeline","Pipeline name",text="Analysis pipeline")
         if ok and name.strip(): self.saved_pipelines[name.strip()]=[dict(x) for x in self.pipeline_steps]; QMessageBox.information(self,"Pipeline saved",f"Saved {len(self.pipeline_steps)} workflow steps as '{name.strip()}'.")
-
     def run_saved_pipeline(self):
         if not self.saved_pipelines: QMessageBox.information(self,"Run pipeline","No saved pipelines yet."); return
         name,ok=QInputDialog.getItem(self,"Run pipeline","Pipeline",list(self.saved_pipelines),0,False)
@@ -388,7 +357,6 @@ class Workbench(QMainWindow):
             if fn: fn(); executed+=1
             else: skipped.append(step)
         QMessageBox.information(self,"Pipeline complete",f"Executed {executed} reusable steps. Skipped {len(skipped)} parameterized or unsupported historical steps." + ("\n\nSkipped: " + ", ".join(skipped[:8]) if skipped else ""))
-
     def open_dashboard_designer(self):
         dialog=QDialog(self); dialog.setWindowTitle("Dashboard Designer"); dialog.resize(560,420); form=QFormLayout(dialog)
         dimension=QComboBox(); dimension.addItem("No filter"); dimension.addItems([str(c) for c in self.model.dataframe.columns]); form.addRow("Dashboard filter",dimension)
@@ -401,12 +369,10 @@ class Workbench(QMainWindow):
         def save_design():
             self.dashboard_filters={"column":dimension.currentText(),"value":None}; self.dashboard_cards=[{"type":"chart","chart":chart.currentText()}]+[{"type":"kpi","name":kpis.item(i).text()} for i in range(kpis.count()) if kpis.item(i).checkState()==Qt.Checked]; dialog.accept(); self.refresh_dashboard(); self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
         buttons.accepted.connect(save_design); buttons.rejected.connect(dialog.reject); dialog.exec()
-
     def dashboard_filtered_df(self):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
-
     def jobs_create(self):
         kinds = ["Pipeline", "Model batch score", "Dataset export", "Monitoring drift check"]
         kind, ok = QInputDialog.getItem(self, "Create job", "Job type", kinds, 0, False)
@@ -442,7 +408,6 @@ class Workbench(QMainWindow):
         job_id = f"job_{self.job_counter:04d}"
         self.scheduled_jobs[job_id] = {"id":job_id, "name":name.strip(), "type":kind, "schedule":schedule, "enabled":True, "config":config, "run_count":0, "last_status":"Never run"}
         QMessageBox.information(self, "Job created", f"Created {job_id} with {schedule} schedule.")
-
     def jobs_execute(self, job_id):
         import time
         job = self.scheduled_jobs[job_id]; started = time.time(); status = "success"; error = None; details = {}
@@ -480,7 +445,6 @@ class Workbench(QMainWindow):
         record = {"job_id":job_id, "job_name":job["name"], "type":job["type"], "status":status, "duration_seconds":round(time.time()-started, 3), "error":error, "details":details}
         self.job_runs.append(record); job["run_count"] += 1; job["last_status"] = status; job["last_error"] = error
         self.refresh_dataset_list(); return record
-
     def jobs_run_now(self):
         options = [(k,v) for k,v in self.scheduled_jobs.items() if v.get("enabled", True)]
         if not options: QMessageBox.information(self, "Run job", "No enabled jobs exist."); return
@@ -488,7 +452,6 @@ class Workbench(QMainWindow):
         choice, ok = QInputDialog.getItem(self, "Run job now", "Job", labels, 0, False)
         if ok:
             result = self.jobs_execute(options[labels.index(choice)][0]); QMessageBox.information(self, "Job finished", f"Status: {result['status']}\nDuration: {result['duration_seconds']} sec" + (f"\nError: {result['error']}" if result['error'] else ""))
-
     def jobs_manager(self):
         if not self.scheduled_jobs: QMessageBox.information(self, "Job manager", "No jobs exist."); return
         dialog = QDialog(self); dialog.setWindowTitle("Job Manager"); dialog.resize(800,500); root = QVBoxLayout(dialog); items = QListWidget(); root.addWidget(items,1); controls = QHBoxLayout(); root.addLayout(controls)
@@ -508,31 +471,61 @@ class Workbench(QMainWindow):
             if key: del self.scheduled_jobs[key]; refresh()
         for label, action in [("Run",run),("Enable/Disable",toggle),("Delete",delete)]: button = QPushButton(label); button.clicked.connect(action); controls.addWidget(button)
         close = QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); refresh(); dialog.exec()
-
     def jobs_history(self):
         if not self.job_runs: QMessageBox.information(self, "Job history", "No runs recorded."); return
         self.console.setPlainText("JOB RUN HISTORY\n" + "="*80 + "\n" + pd.DataFrame(self.job_runs).tail(200).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
-
     def jobs_export_runner(self):
         if not self.scheduled_jobs: QMessageBox.information(self, "Export runner", "Create a job first."); return
+        if not self.current_project_path:
+            QMessageBox.information(self, "Export runner", "Save the project before exporting a headless runner.")
+            return
         keys = list(self.scheduled_jobs); labels = [f"{k} | {self.scheduled_jobs[k]['name']}" for k in keys]; choice, ok = QInputDialog.getItem(self, "Export runner", "Job", labels, 0, False)
         if not ok: return
         job_id = keys[labels.index(choice)]; folder = QFileDialog.getExistingDirectory(self, "Export job runner")
         if not folder: return
         out = Path(folder) / f"workbench_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
         (out / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
-        runner = "import json\nfrom pathlib import Path\njob=json.loads((Path(__file__).parent/'job.json').read_text())\nprint(json.dumps(job,indent=2))\nprint('Use Python Data Workbench v0.20 headless runtime to execute this contract.')\n"
-        (out / "run_job.py").write_text(runner, encoding="utf-8"); (out / "run_job.bat").write_text('@echo off\ncd /d "%~dp0"\npython run_job.py\n', encoding="utf-8")
+        runtime_source = Path(__file__).with_name("workbench_headless_v0.20.py")
+        if not runtime_source.exists():
+            QMessageBox.critical(self, "Export runner", f"Headless runtime not found:\n{runtime_source}")
+            return
+        shutil.copy2(runtime_source, out / runtime_source.name)
+        runner_config = {"project": str(Path(self.current_project_path).resolve()), "job_file": "job.json"}
+        (out / "runner.json").write_text(json.dumps(runner_config, indent=2), encoding="utf-8")
+        runner = """import json
+import subprocess
+import sys
+from pathlib import Path
+base = Path(__file__).resolve().parent
+config = json.loads((base / "runner.json").read_text(encoding="utf-8"))
+command = [
+    sys.executable,
+    str(base / "workbench_headless_v0.20.py"),
+    "--project", config["project"],
+    "--job-file", str(base / config["job_file"]),
+    "--json-output", str(base / "last_run.json"),
+]
+raise SystemExit(subprocess.call(command))
+"""
+        (out / "run_job.py").write_text(runner, encoding="utf-8")
+        (out / "run_job.bat").write_text('@echo off\nsetlocal\ncd /d "%~dp0"\npython run_job.py\nset EXIT_CODE=%ERRORLEVEL%\necho.\necho Exit code: %EXIT_CODE%\nexit /b %EXIT_CODE%\n', encoding="utf-8")
+        (out / "run_job.sh").write_text('#!/usr/bin/env sh\nset -eu\ncd "$(dirname "$0")"\npython3 run_job.py\n', encoding="utf-8")
         schedule = {"Hourly":"/SC HOURLY /MO 1", "Daily":"/SC DAILY /ST 08:00", "Weekly":"/SC WEEKLY /D MON /ST 08:00", "Monthly":"/SC MONTHLY /D 1 /ST 08:00"}.get(job["schedule"])
         if schedule: (out / "register_windows_task.bat").write_text(f'@echo off\nschtasks /Create /TN "PythonDataWorkbench_{job_id}" {schedule} /TR "\"%~dp0run_job.bat\"" /F\npause\n', encoding="utf-8")
-        QMessageBox.information(self, "Runner exported", f"Exported to:\n{out}")
-
+        (out / "README.txt").write_text(
+            "Python Data Workbench v0.20 headless runner\n\n"
+            "Run run_job.bat on Windows or run_job.sh on macOS/Linux.\n"
+            "The runner loads the saved .pdw project, executes job.json, records history, "
+            "persists generated datasets and monitoring results, and writes last_run.json.\n"
+            "If the project moves, update the project path in runner.json.\n",
+            encoding="utf-8",
+        )
+        QMessageBox.information(self, "Runner exported", f"Complete v0.20 headless runner exported to:\n{out}")
     def jobs_report(self):
         lines = ["SCHEDULER AND JOBS REPORT", "="*80, f"Jobs: {len(self.scheduled_jobs)}", f"Runs: {len(self.job_runs)}", f"Failed: {sum(x.get('status') == 'failed' for x in self.job_runs)}", ""]
         if self.scheduled_jobs: lines.extend(["JOB DEFINITIONS", pd.DataFrame([dict(id=k, **v) for k,v in self.scheduled_jobs.items()]).to_string(index=False), ""])
         if self.job_runs: lines.extend(["LATEST RUNS", pd.DataFrame(self.job_runs[-50:]).to_string(index=False)])
         self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
-
     def api_select_registered_model(self):
         if not self.model_registry:
             self.ml_model_registry()
@@ -543,7 +536,6 @@ class Workbench(QMainWindow):
         labels = [f"{key} {'[ACTIVE]' if value.get('active') else ''}" for key, value in candidates]
         choice, ok = QInputDialog.getItem(self, "API deployment", "Model version", labels, 0, False)
         return candidates[labels.index(choice)] if ok else (None, None)
-
     def api_create_deployment(self):
         key, metadata = self.api_select_registered_model()
         if not metadata:
@@ -565,7 +557,6 @@ class Workbench(QMainWindow):
             "health_endpoint": "/health", "active": True,
         }
         QMessageBox.information(self, "API deployment", f"Created deployment '{name}'.")
-
     def api_generate_server_code(self, deployment):
         name = deployment["name"]
         version = deployment["api_version"]
@@ -576,7 +567,6 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict
 import pandas as pd
-
 BASE_DIR = Path(__file__).resolve().parent
 with open(BASE_DIR / "model.pkl", "rb") as handle:
     artifact = pickle.load(handle)
@@ -584,21 +574,16 @@ model = artifact["model"]
 features = artifact["features"]
 target = artifact["target"]
 classification = artifact.get("classification", False)
-
 app = FastAPI(title=__NAME__, version=__VERSION__)
-
 class PredictionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     records: list[dict[str, Any]]
-
 @app.get("/health")
 def health():
     return {"status": "ok", "model": __NAME__, "model_version": __MODEL_VERSION__}
-
 @app.get("/metadata")
 def metadata():
     return {"model": __NAME__, "target": target, "features": features, "classification": classification}
-
 @app.post("/v1/models/__PATH_NAME__/predict")
 def predict(request: PredictionRequest):
     try:
@@ -616,7 +601,6 @@ def predict(request: PredictionRequest):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-
 @app.post("/v1/models/__PATH_NAME__/predict-batch")
 def predict_batch(request: PredictionRequest):
     return predict(request)
@@ -625,7 +609,6 @@ def predict_batch(request: PredictionRequest):
                 .replace("__VERSION__", repr(version))
                 .replace("__MODEL_VERSION__", repr(model_version))
                 .replace("__PATH_NAME__", name))
-
     def api_export_package(self):
         if not self.api_deployments:
             QMessageBox.information(self, "Export API", "Create a deployment first.")
@@ -653,7 +636,6 @@ def predict_batch(request: PredictionRequest):
         (out / "run_api.sh").write_text('#!/usr/bin/env sh\nset -eu\ncd "$(dirname "$0")"\n[ -x .venv/bin/python ] || python3 -m venv .venv\n.venv/bin/python -m pip install -r requirements.txt\nexec .venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8000\n', encoding="utf-8")
         (out / "README.md").write_text(f"# {name} REST API\n\nOpenAPI docs: http://127.0.0.1:8000/docs\n\nHealth: GET /health\n\nPrediction: POST {deployment['endpoint']}\n", encoding="utf-8")
         QMessageBox.information(self, "API exported", f"Package created at:\n{out}")
-
     def api_test_prediction(self):
         try:
             if not self.api_deployments:
@@ -686,7 +668,6 @@ def predict_batch(request: PredictionRequest):
         except Exception as exc:
             self.api_request_history.append({"deployment": locals().get("name"), "kind": "test", "status": "failed", "error": str(exc)})
             QMessageBox.critical(self, "API test failed", str(exc))
-
     def api_batch_score(self):
         try:
             if not self.api_deployments:
@@ -714,14 +695,12 @@ def predict_batch(request: PredictionRequest):
         except Exception as exc:
             self.api_request_history.append({"deployment": locals().get("name"), "kind": "batch", "status": "failed", "error": str(exc)})
             QMessageBox.critical(self, "Batch score failed", str(exc))
-
     def api_history_view(self):
         if not self.api_request_history:
             QMessageBox.information(self, "API history", "No API requests have been recorded.")
             return
         self.console.setPlainText("API REQUEST HISTORY\n" + "=" * 80 + "\n" + pd.DataFrame(self.api_request_history).tail(200).to_string(index=False))
         self.tabs.setCurrentWidget(self.python_page)
-
     def api_deployment_report(self):
         lines = ["DEPLOYMENT AND REST API REPORT", "=" * 80, f"Deployments: {len(self.api_deployments)}", f"Recorded requests: {len(self.api_request_history)}", ""]
         for name, item in self.api_deployments.items():
@@ -730,7 +709,6 @@ def predict_batch(request: PredictionRequest):
             lines.extend(["LATEST REQUESTS", pd.DataFrame(self.api_request_history[-50:]).to_string(index=False)])
         self.console.setPlainText("\n".join(lines))
         self.tabs.setCurrentWidget(self.python_page)
-
     def monitor_select_model(self):
         if not self.model_registry:
             self.ml_model_registry()
@@ -740,7 +718,6 @@ def predict_batch(request: PredictionRequest):
         choice,ok=QInputDialog.getItem(self,"Model monitoring","Registered model",labels,0,False)
         if not ok:return None,None
         key=keys[labels.index(choice)];return key,self.model_registry[key]
-
     def monitor_numeric_profile(self, series, bins=None):
         clean=pd.to_numeric(series,errors="coerce").dropna()
         if clean.empty:return {"type":"numeric","edges":[],"proportions":[],"missing_rate":1.0,"mean":None,"std":None}
@@ -751,13 +728,11 @@ def predict_batch(request: PredictionRequest):
         else:edges=np.asarray(bins,dtype=float)
         counts=pd.cut(clean,edges,include_lowest=True,duplicates="drop").value_counts(sort=False);props=(counts/max(1,counts.sum())).to_numpy(float)
         return {"type":"numeric","edges":[float(x) for x in edges],"proportions":props.tolist(),"missing_rate":float(series.isna().mean()),"mean":float(clean.mean()),"std":float(clean.std(ddof=1)) if len(clean)>1 else 0.0}
-
     def monitor_categorical_profile(self, series, categories=None):
         values=series.astype("object").where(series.notna(),"__MISSING__").astype(str)
         cats=list(categories) if categories is not None else list(values.value_counts().head(20).index)
         mapped=values.where(values.isin(cats),"__OTHER__");order=cats+([] if "__OTHER__" in cats else ["__OTHER__"]);counts=mapped.value_counts();props=[float(counts.get(c,0)/max(1,len(values))) for c in order]
         return {"type":"categorical","categories":order,"proportions":props,"missing_rate":float(series.isna().mean()),"unique":int(series.nunique(dropna=True))}
-
     def monitor_create_baseline(self):
         try:
             key,meta=self.monitor_select_model()
@@ -769,10 +744,8 @@ def predict_batch(request: PredictionRequest):
             name=f"{key}:baseline";self.monitoring_baselines[name]={"name":name,"model_key":key,"dataset":dataset,"rows":len(df),"features":features,"profiles":profiles,"target":meta.get("target"),"problem":meta.get("problem"),"metrics":meta.get("metrics",{})}
             QMessageBox.information(self,"Monitoring baseline",f"Created baseline for {len(features)} features and {len(df):,} rows.")
         except Exception as exc:QMessageBox.critical(self,"Baseline failed",str(exc))
-
     def monitor_psi(self, expected, actual):
         e=np.asarray(expected,dtype=float);a=np.asarray(actual,dtype=float);n=max(len(e),len(a));e=np.pad(e,(0,n-len(e)),constant_values=0);a=np.pad(a,(0,n-len(a)),constant_values=0);eps=1e-6;e=np.clip(e,eps,None);a=np.clip(a,eps,None);return float(np.sum((a-e)*np.log(a/e)))
-
     def monitor_run_drift(self):
         try:
             if not self.monitoring_baselines:QMessageBox.information(self,"Drift","Create a baseline first.");return
@@ -793,7 +766,6 @@ def predict_batch(request: PredictionRequest):
             table=pd.DataFrame(rows).sort_values("psi",ascending=False,na_position="first");run={"baseline":name,"dataset":self.active_dataset,"rows":len(df),"summary":table.to_dict(orient="records"),"critical":int((table["status"]=="CRITICAL").sum()),"warning":int((table["status"]=="WARNING").sum())};self.monitoring_runs.append(run);self.monitoring_alerts.extend(alerts)
             self.console.setPlainText(f"Drift check\nBaseline: {name}\nCurrent dataset: {self.active_dataset}\nRows: {len(df):,}\nCritical: {run['critical']}\nWarnings: {run['warning']}\n\nPSI interpretation used: <0.10 stable, 0.10-0.25 warning, >=0.25 critical.\n\n{table.to_string(index=False)}");self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc:QMessageBox.critical(self,"Drift check failed",str(exc))
-
     def monitor_performance(self):
         try:
             from sklearn.metrics import accuracy_score,balanced_accuracy_score,f1_score,roc_auc_score,r2_score,mean_absolute_error,mean_squared_error
@@ -821,16 +793,13 @@ def predict_batch(request: PredictionRequest):
             if severity!="STABLE":self.monitoring_alerts.append({"baseline":key,"feature":"model_performance","severity":severity,"message":f"{primary} change {delta.get(primary):.4f}"})
             self.console.setPlainText("Model performance monitoring\n"+f"Model: {key}\nRows with outcomes: {len(work):,}\nStatus: {severity}\n\nCurrent metrics:\n"+"\n".join(f"{k}: {v:.6f}" for k,v in metrics.items())+"\n\nChange versus registry baseline:\n"+"\n".join(f"{k}: {v:+.6f}" for k,v in delta.items()));self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc:QMessageBox.critical(self,"Performance monitoring failed",str(exc))
-
     def monitor_drift_dashboard(self):
         if not self.monitoring_runs:QMessageBox.information(self,"Drift dashboard","Run a drift check first.");return
         run=self.monitoring_runs[-1];table=pd.DataFrame(run["summary"]);plot=table.dropna(subset=["psi"]).sort_values("psi")
         self.figure.clear();ax=self.figure.add_subplot(111);colors=["#dc2626" if x>=self.drift_thresholds["critical"] else "#f59e0b" if x>=self.drift_thresholds["warning"] else "#16a34a" for x in plot["psi"]];ax.barh(plot["feature"],plot["psi"],color=colors);ax.axvline(self.drift_thresholds["warning"],color="#f59e0b",linestyle="--",label="Warning 0.10");ax.axvline(self.drift_thresholds["critical"],color="#dc2626",linestyle="--",label="Critical 0.25");ax.set_xlabel("Population Stability Index");ax.set_title("Feature drift dashboard");ax.legend();ax.grid(True,axis="x",alpha=.2);self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page)
-
     def monitor_alerts_view(self):
         if not self.monitoring_alerts:QMessageBox.information(self,"Monitoring alerts","No monitoring alerts have been recorded.");return
         table=pd.DataFrame(self.monitoring_alerts);self.console.setPlainText("MONITORING ALERTS\n"+"="*80+"\n"+table.tail(200).to_string(index=False));self.tabs.setCurrentWidget(self.python_page)
-
     def monitoring_report(self):
         lines=["MODEL MONITORING AND DRIFT REPORT","="*80,f"Active dataset: {self.active_dataset}",f"Baselines: {len(self.monitoring_baselines)}",f"Drift runs: {len(self.monitoring_runs)}",f"Alerts: {len(self.monitoring_alerts)}",""]
         if self.monitoring_runs:
@@ -838,19 +807,16 @@ def predict_batch(request: PredictionRequest):
         if self.prediction_history:lines.extend(["LATEST PERFORMANCE RUN",str(self.prediction_history[-1]),""])
         if self.monitoring_alerts:lines.extend(["LATEST ALERTS",pd.DataFrame(self.monitoring_alerts[-50:]).to_string(index=False)])
         self.console.setPlainText("\n".join(lines));self.tabs.setCurrentWidget(self.python_page)
-
     def ml_get_ready_experiment(self):
         exp=self.automl_get_experiment()
         if not exp:return None
         if exp.get("best_model") is None:self.automl_run_leaderboard();exp=self.automl_experiments.get(self.active_experiment)
         return exp
-
     def ml_holdout(self, exp):
         from sklearn.model_selection import train_test_split
         from sklearn.base import clone
         X,y,_,_,_=self.automl_prepare(exp);strat=y if exp["problem"]=="classification" and y.value_counts().min()>=2 else None
         Xtr,Xte,ytr,yte=train_test_split(X,y,test_size=.2,random_state=42,stratify=strat);model=clone(exp["best_model"]);model.fit(Xtr,ytr);return model,Xte,yte
-
     def ml_confusion_matrix(self):
         try:
             from sklearn.metrics import confusion_matrix,ConfusionMatrixDisplay,classification_report
@@ -860,7 +826,6 @@ def predict_batch(request: PredictionRequest):
             self.figure.clear();ax=self.figure.add_subplot(111);ConfusionMatrixDisplay(cm,display_labels=labels).plot(ax=ax,cmap="Blues",colorbar=False);ax.set_title(f"Confusion matrix: {exp['target']}");self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page)
             exp["confusion_matrix"]={"labels":[str(x) for x in labels],"matrix":cm.tolist(),"report":classification_report(yte,pred,zero_division=0)}
         except Exception as exc:QMessageBox.critical(self,"Confusion matrix failed",str(exc))
-
     def ml_roc_pr_curves(self):
         try:
             from sklearn.metrics import roc_curve,auc,precision_recall_curve,average_precision_score
@@ -878,7 +843,6 @@ def predict_batch(request: PredictionRequest):
                 fpr,tpr,_=roc_curve(truth,score);precision,recall,_=precision_recall_curve(truth,score);ra=auc(fpr,tpr);ap=average_precision_score(truth,score);ax1.plot(fpr,tpr,label=f"{c} AUC={ra:.3f}");ax2.plot(recall,precision,label=f"{c} AP={ap:.3f}");summary.append({"class":str(c),"roc_auc":float(ra),"average_precision":float(ap)})
             ax1.plot([0,1],[0,1],"--",color="gray");ax1.set_title("ROC curves");ax1.set_xlabel("False positive rate");ax1.set_ylabel("True positive rate");ax2.set_title("Precision-recall curves");ax2.set_xlabel("Recall");ax2.set_ylabel("Precision");ax1.legend();ax2.legend();ax1.grid(True,alpha=.2);ax2.grid(True,alpha=.2);self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page);exp["roc_pr_summary"]=summary
         except Exception as exc:QMessageBox.critical(self,"ROC/PR failed",str(exc))
-
     def ml_calibration_curve(self):
         try:
             from sklearn.calibration import calibration_curve
@@ -889,7 +853,6 @@ def predict_batch(request: PredictionRequest):
             score=model.predict_proba(Xte)[:,1];truth=(np.asarray(yte)==model.classes_[1]).astype(int);obs,pred=calibration_curve(truth,score,n_bins=min(10,max(3,len(yte)//10)),strategy="quantile")
             self.figure.clear();ax=self.figure.add_subplot(111);ax.plot(pred,obs,marker="o",label="Model");ax.plot([0,1],[0,1],"--",color="gray",label="Ideal");ax.set_title(f"Calibration: {model.classes_[1]}");ax.set_xlabel("Mean predicted probability");ax.set_ylabel("Observed frequency");ax.legend();ax.grid(True,alpha=.25);self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page);exp["calibration"]=[{"predicted":float(a),"observed":float(b)} for a,b in zip(pred,obs)]
         except Exception as exc:QMessageBox.critical(self,"Calibration failed",str(exc))
-
     def ml_learning_curve(self):
         try:
             from sklearn.model_selection import learning_curve,StratifiedKFold,KFold
@@ -898,7 +861,6 @@ def predict_batch(request: PredictionRequest):
             sizes,tr,te=learning_curve(exp["best_model"],X,y,cv=cv,scoring=scoring,train_sizes=np.linspace(.2,1,5));tm,vm=tr.mean(axis=1),te.mean(axis=1)
             self.figure.clear();ax=self.figure.add_subplot(111);ax.plot(sizes,tm,marker="o",label="Training");ax.plot(sizes,vm,marker="o",label="Cross-validation");ax.set_title(f"Learning curve: {exp['target']}");ax.set_xlabel("Training rows");ax.set_ylabel(scoring);ax.legend();ax.grid(True,alpha=.25);self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page);exp["learning_curve"]=[{"rows":int(n),"train":float(a),"cv":float(b)} for n,a,b in zip(sizes,tm,vm)]
         except Exception as exc:QMessageBox.critical(self,"Learning curve failed",str(exc))
-
     def ml_residual_diagnostics(self):
         try:
             from sklearn.metrics import r2_score,mean_absolute_error
@@ -907,7 +869,6 @@ def predict_batch(request: PredictionRequest):
             model,Xte,yte=self.ml_holdout(exp);pred=model.predict(Xte);resid=np.asarray(yte)-np.asarray(pred)
             self.figure.clear();ax=self.figure.add_subplot(121);ax.scatter(pred,resid,alpha=.65);ax.axhline(0,color="gray",linestyle="--");ax.set_title("Residual vs predicted");ax.set_xlabel("Predicted");ax.set_ylabel("Residual");ax2=self.figure.add_subplot(122);ax2.hist(resid,bins=20,color="#2563eb",edgecolor="white");ax2.set_title("Residual distribution");self.canvas.draw();self.tabs.setCurrentWidget(self.chart_page);exp["residual_diagnostics"]={"r2":float(r2_score(yte,pred)),"mae":float(mean_absolute_error(yte,pred)),"residual_mean":float(np.mean(resid)),"residual_std":float(np.std(resid,ddof=1))}
         except Exception as exc:QMessageBox.critical(self,"Residual diagnostics failed",str(exc))
-
     def ml_model_registry(self):
         exp=self.automl_get_experiment()
         if exp and exp.get("best_model") is not None:
@@ -917,13 +878,11 @@ def predict_batch(request: PredictionRequest):
             self.model_registry[key]={"version":version,"dataset":exp["dataset"],"target":exp["target"],"problem":exp["problem"],"model_name":exp.get("best_model_name"),"metrics":exp.get("metrics",{}),"features":exp["features"],"active":True};self.trained_models[key]={"model":exp["best_model"],"features":exp["features"],"target":exp["target"],"classification":exp["problem"]=="classification"}
         lines=["MODEL REGISTRY","="*80]+[f"{'*' if v.get('active') else ' '} {k} | {v.get('model_name')} | {v.get('metrics')}" for k,v in self.model_registry.items()]+["","PREDICTION HISTORY","-"*80]+[str(x) for x in self.prediction_history[-50:]]
         self.console.setPlainText("\n".join(lines));self.tabs.setCurrentWidget(self.python_page)
-
     def automl_detect_problem(self, target):
         y=self.model.dataframe[target].dropna()
         if y.dtype == object or str(y.dtype).startswith("category") or y.nunique() <= max(10, int(len(y)*.05)):
             return "classification"
         return "regression"
-
     def automl_new_experiment(self):
         df=self.model.dataframe
         target,ok=QInputDialog.getItem(self,"New AutoML experiment","Target column",list(df.columns),0,False)
@@ -936,7 +895,6 @@ def predict_batch(request: PredictionRequest):
         features=[c for c in df.columns if c!=target]
         self.automl_experiments[name.strip()]={"name":name.strip(),"dataset":self.active_dataset,"target":target,"features":features,"problem":problem,"status":"configured","leaderboard":None,"best_model":None,"best_model_name":None,"metrics":{},"metadata":{"rows":len(df),"created_with":"v0.15"}}
         self.active_experiment=name.strip(); QMessageBox.information(self,"AutoML experiment",f"Created '{name.strip()}'.\nDetected problem: {problem}\nFeatures: {len(features)}")
-
     def automl_get_experiment(self):
         if self.active_experiment in self.automl_experiments:return self.automl_experiments[self.active_experiment]
         if not self.automl_experiments:
@@ -945,7 +903,6 @@ def predict_batch(request: PredictionRequest):
         name,ok=QInputDialog.getItem(self,"AutoML experiment","Experiment",list(self.automl_experiments),0,False)
         if not ok:return None
         self.active_experiment=name; return self.automl_experiments[name]
-
     def automl_prepare(self, exp):
         from sklearn.compose import ColumnTransformer
         from sklearn.pipeline import Pipeline
@@ -958,7 +915,6 @@ def predict_batch(request: PredictionRequest):
         if categorical: transformers.append(("cat",Pipeline([("impute",SimpleImputer(strategy="most_frequent")),("encode",OneHotEncoder(handle_unknown="ignore"))]),categorical))
         pre=ColumnTransformer(transformers,remainder="drop")
         return X,y,pre,numeric,categorical
-
     def automl_candidates(self, problem):
         if problem=="classification":
             from sklearn.linear_model import LogisticRegression
@@ -969,7 +925,6 @@ def predict_batch(request: PredictionRequest):
         from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, HistGradientBoostingRegressor
         from sklearn.dummy import DummyRegressor
         return {"Baseline":DummyRegressor(strategy="mean"),"Linear Regression":LinearRegression(),"Ridge":Ridge(),"Random Forest":RandomForestRegressor(n_estimators=250,random_state=42,n_jobs=-1),"Extra Trees":ExtraTreesRegressor(n_estimators=250,random_state=42,n_jobs=-1),"Histogram Gradient Boosting":HistGradientBoostingRegressor(random_state=42)}
-
     def automl_run_leaderboard(self):
         try:
             from sklearn.pipeline import Pipeline
@@ -1004,7 +959,6 @@ def predict_batch(request: PredictionRequest):
             self.trained_models[exp["name"]]={"model":exp["best_model"],"features":exp["features"],"target":exp["target"],"classification":exp["problem"]=="classification"}
             self.console.setPlainText(f"AutoML leaderboard: {exp['name']}\nBest model: {best_name}\nPrimary metric: {metric}\n\n"+board.sort_values(metric,ascending=False,na_position="last").to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"AutoML leaderboard failed",str(exc))
-
     def automl_tune_best(self):
         try:
             from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, KFold
@@ -1026,7 +980,6 @@ def predict_batch(request: PredictionRequest):
             search.fit(X,y); exp["best_model"]=search.best_estimator_; exp["tuning"]={"best_score":float(search.best_score_),"best_params":search.best_params_,"scoring":scoring}; exp["status"]="tuned"; self.trained_models[exp["name"]]["model"]=exp["best_model"]
             self.console.setPlainText(f"AutoML tuning complete\nExperiment: {exp['name']}\nModel: {name}\nScoring: {scoring}\nBest CV score: {search.best_score_:.6f}\nBest parameters:\n"+json.dumps(search.best_params_,indent=2)); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"AutoML tuning failed",str(exc))
-
     def automl_evaluate_holdout(self):
         try:
             from sklearn.model_selection import train_test_split
@@ -1048,7 +1001,6 @@ def predict_batch(request: PredictionRequest):
                 metrics={"r2":r2_score(yte,pred),"mae":mean_absolute_error(yte,pred),"rmse":mean_squared_error(yte,pred)**.5}; text="Holdout regression evaluation\n"+"\n".join(f"{k}: {v:.6f}" for k,v in metrics.items()); table=pd.DataFrame({"actual":yte.values,"predicted":pred,"residual":yte.values-pred})
             exp["metrics"]=metrics; exp["holdout_table"]=table.to_dict(orient="records"); exp["holdout_model"]=model; exp["status"]="evaluated"; self.console.setPlainText(text+"\n\n"+table.head(100).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"AutoML evaluation failed",str(exc))
-
     def automl_explain(self):
         try:
             from sklearn.inspection import permutation_importance
@@ -1059,7 +1011,6 @@ def predict_batch(request: PredictionRequest):
             table=pd.DataFrame({"feature":sample.columns,"importance_mean":result.importances_mean,"importance_std":result.importances_std}).sort_values("importance_mean",ascending=False).reset_index(drop=True); exp["feature_importance"]=table.to_dict(orient="records")
             self.console.setPlainText(f"Permutation feature importance\nExperiment: {exp['name']}\nModel: {exp['best_model_name']}\nScoring: {scoring}\nSample rows: {sample_n:,}\n\n"+table.to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"Model explanation failed",str(exc))
-
     def automl_export_bundle(self):
         try:
             exp=self.automl_get_experiment()
@@ -1070,12 +1021,10 @@ def predict_batch(request: PredictionRequest):
             with open(path,"wb") as handle:pickle.dump(bundle,handle,protocol=pickle.HIGHEST_PROTOCOL)
             schema_path=str(Path(path).with_suffix(".schema.json")); Path(schema_path).write_text(json.dumps({k:v for k,v in bundle.items() if k!="model"},indent=2,default=str),encoding="utf-8"); QMessageBox.information(self,"AutoML export",f"Saved model bundle:\n{path}\n\nSaved readable schema:\n{schema_path}")
         except Exception as exc: QMessageBox.critical(self,"AutoML export failed",str(exc))
-
     def store_engineering_result(self, name, text, table=None):
         self.engineering_results[name] = {"text": text, "table": table.to_dict(orient="records") if isinstance(table, pd.DataFrame) else None}
         self.console.setPlainText(text + ("\n\n" + table.head(100).to_string(index=False) if isinstance(table, pd.DataFrame) else ""))
         self.tabs.setCurrentWidget(self.python_page)
-
     def engineering_fft(self):
         try:
             from scipy import signal
@@ -1095,7 +1044,6 @@ def predict_batch(request: PredictionRequest):
             self.store_engineering_result("FFT spectrum", text, result)
             self.figure.clear(); ax=self.figure.add_subplot(111); ax.plot(freq, amplitude, color="#2563eb"); ax.set_title(f"FFT amplitude spectrum: {col}"); ax.set_xlabel("Frequency (Hz)"); ax.set_ylabel("Amplitude"); ax.grid(True, alpha=.25); self.canvas.draw(); self.tabs.setCurrentWidget(self.chart_page)
         except Exception as exc: QMessageBox.critical(self, "FFT failed", str(exc))
-
     def engineering_filter(self):
         try:
             from scipy import signal
@@ -1122,7 +1070,6 @@ def predict_batch(request: PredictionRequest):
             text=f"Butterworth {kind} filter\nSignal: {col}\nSampling rate: {rate:g} Hz\nOrder: {order}\nCutoff: {cutoff}\nOutput column: {out_col}"
             self.engineering_results["Digital filter"]={"text":text,"table":None}
         except Exception as exc: QMessageBox.critical(self, "Digital filter failed", str(exc))
-
     def engineering_peaks(self):
         try:
             from scipy.signal import find_peaks
@@ -1139,7 +1086,6 @@ def predict_batch(request: PredictionRequest):
             text=f"Peak analysis for {col}\nDetected peaks: {len(peaks):,}\nMinimum prominence: {prominence:g}\nMinimum distance: {distance} samples"
             self.store_engineering_result("Peak analysis",text,result)
         except Exception as exc: QMessageBox.critical(self,"Peak analysis failed",str(exc))
-
     def engineering_numerical_solver(self):
         try:
             from scipy import integrate, optimize
@@ -1159,7 +1105,6 @@ def predict_batch(request: PredictionRequest):
                 sol=optimize.root_scalar(fn,bracket=[a,b],method="brentq"); text=f"Root solving\nExpression: {expr}\nBracket: [{a}, {b}]\nRoot: {sol.root:.12g}\nConverged: {sol.converged}\nIterations: {sol.iterations}"
             self.store_engineering_result("Numerical solver",text)
         except Exception as exc: QMessageBox.critical(self,"Numerical solver failed",str(exc))
-
     def engineering_curve_fit(self):
         try:
             from scipy.optimize import curve_fit
@@ -1179,7 +1124,6 @@ def predict_batch(request: PredictionRequest):
             text=f"Curve fitting\nModel: {kind}\nX: {x}\nY: {y}\nParameters: {', '.join(f'{v:.8g}' for v in params)}\nR-squared: {r2:.6f}\nRMSE: {np.sqrt(np.mean(residual**2)):.6f}"
             self.engineering_results["Curve fitting"]={"text":text,"table":None}; self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"Curve fitting failed",str(exc))
-
     def engineering_reliability_spc(self):
         try:
             from scipy import stats
@@ -1206,7 +1150,6 @@ def predict_batch(request: PredictionRequest):
                 mean=values.mean(); sigma=values.std(ddof=1); cp=(usl-lsl)/(6*sigma); cpk=min((usl-mean)/(3*sigma),(mean-lsl)/(3*sigma)); text=f"Process capability\nMean={mean:.6f}\nSigma={sigma:.6f}\nLSL={lsl:.6f}\nUSL={usl:.6f}\nCp={cp:.4f}\nCpk={cpk:.4f}"; table=None
             self.store_engineering_result(mode,text,table)
         except Exception as exc: QMessageBox.critical(self,"Reliability / SPC failed",str(exc))
-
     def engineering_monte_carlo(self):
         try:
             variables,ok=QInputDialog.getText(self,"Monte Carlo Pro","Variables as name:distribution:param1:param2; ...",text="revenue:normal:10000000:1000000; cost:normal:7000000:800000")
@@ -1228,7 +1171,6 @@ def predict_batch(request: PredictionRequest):
             text=f"Monte Carlo simulation\nIterations: {iterations:,}\nExpression: {expression}\nExpected value: {np.mean(output):,.6f}\nStandard deviation: {np.std(output):,.6f}\nProbability below zero: {loss:.2%}"
             self.store_engineering_result("Monte Carlo Pro",text,table)
         except Exception as exc: QMessageBox.critical(self,"Monte Carlo simulation failed",str(exc))
-
     def engineering_parameter_sweep(self):
         try:
             expr,ok=QInputDialog.getText(self,"Parameter sweep","Expression in x",text="-0.5*x**2 + 10*x + 20")
@@ -1243,13 +1185,11 @@ def predict_batch(request: PredictionRequest):
             text=f"Parameter sweep\nExpression: {expr}\nRange: {start} to {stop}\nPoints: {points:,}\nMaximum response: {best['response']:.8g} at x={best['x']:.8g}"
             self.store_engineering_result("Parameter sweep",text,result)
         except Exception as exc: QMessageBox.critical(self,"Parameter sweep failed",str(exc))
-
     def engineering_report(self):
         if not self.engineering_results: QMessageBox.information(self,"Engineering report","Run an Engineering Studio analysis first."); return
         lines=["ENGINEERING AND SCIENTIFIC ANALYTICS REPORT","="*72,f"Dataset: {self.active_dataset}",""]
         for name,result in self.engineering_results.items(): lines.extend([name.upper(),"-"*len(name),result.get("text",""),""])
         self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
-
     def choose_group_and_measure(self, title):
         df=self.model.dataframe
         groups=list(df.select_dtypes(exclude=np.number).columns)
@@ -1260,11 +1200,9 @@ def predict_batch(request: PredictionRequest):
         if not ok:return None,None
         measure,ok=QInputDialog.getItem(self,title,"Numeric measure",nums,0,False)
         return (group,measure) if ok else (None,None)
-
     def store_statistics_result(self, name, text, table=None):
         self.statistics_results[name]={"text":text,"table":table.to_dict(orient="records") if isinstance(table,pd.DataFrame) else None}
         self.console.setPlainText(text + ("\n\n"+table.to_string(index=False) if isinstance(table,pd.DataFrame) else "")); self.tabs.setCurrentWidget(self.python_page)
-
     def guided_statistical_test(self):
         try:
             from scipy import stats
@@ -1303,7 +1241,6 @@ def predict_batch(request: PredictionRequest):
                 clean=df[[x,y]].dropna(); stat,p=stats.ttest_rel(clean[x],clean[y]); diff=clean[x]-clean[y]; d=diff.mean()/diff.std(ddof=1) if diff.std(ddof=1) else np.nan; text=f"Paired t-test\nN={len(clean)}\nMean difference={diff.mean():.4f}\nt={stat:.4f}, p={p:.6g}, paired Cohen's d={d:.4f}\nInterpretation: {'significant paired difference' if p<.05 else 'no statistically significant paired difference'} at alpha=.05."
             self.store_statistics_result(mode,text)
         except Exception as exc: QMessageBox.critical(self,"Statistical test failed",str(exc))
-
     def statistics_assumption_checks(self):
         try:
             from scipy import stats
@@ -1320,7 +1257,6 @@ def predict_batch(request: PredictionRequest):
             table=pd.DataFrame(rows).round(5); text=f"Assumption checks for {measure} by {group}\nLevene robust variance test: statistic={lev_stat:.4f}, p={lev_p:.6g}\nVariance interpretation: {'variance heterogeneity indicated' if lev_p<.05 else 'no significant evidence of unequal variances'} at alpha=.05.\nShapiro-Wilk is reported by group; for large samples also inspect plots and practical deviations."
             self.store_statistics_result("Assumption checks",text,table)
         except Exception as exc: QMessageBox.critical(self,"Assumption checks failed",str(exc))
-
     def statistics_effect_size(self):
         try:
             group,measure=self.choose_group_and_measure("Effect size")
@@ -1332,7 +1268,6 @@ def predict_batch(request: PredictionRequest):
             text=f"Effect size\nGroups: {levels[0]} vs {levels[1]}\nCohen's d={d:.4f}\nPractical magnitude using conventional thresholds: {magnitude}.\nThresholds are descriptive conventions, not universal decision rules."
             self.store_statistics_result("Effect size",text)
         except Exception as exc: QMessageBox.critical(self,"Effect size failed",str(exc))
-
     def statistics_confidence_interval(self):
         try:
             from scipy import stats
@@ -1344,7 +1279,6 @@ def predict_batch(request: PredictionRequest):
             text=f"95% confidence interval for the mean of {col}\nN={n}\nMean={mean:.6f}\nStandard error={se:.6f}\n95% CI=[{lo:.6f}, {hi:.6f}]\nInterpretation: under the t-based model assumptions, this interval estimates the population mean with 95% confidence coverage over repeated samples."
             self.store_statistics_result("Confidence interval",text)
         except Exception as exc: QMessageBox.critical(self,"Confidence interval failed",str(exc))
-
     def statistics_regression_diagnostics(self):
         try:
             from scipy import stats
@@ -1357,13 +1291,11 @@ def predict_batch(request: PredictionRequest):
             text=f"Linear regression diagnostics\nModel: {y} = {fit.intercept:.5f} + {fit.slope:.5f} × {x}\nN={len(clean)}\nR-squared={fit.rvalue**2:.5f}\nRMSE={rmse:.5f}\nMAE={mae:.5f}\nSlope p={fit.pvalue:.6g}\nResidual Shapiro-Wilk p={normal_p:.6g}\nInterpretation: {'slope is statistically significant' if fit.pvalue<.05 else 'slope is not statistically significant'} at alpha=.05. Residual normality {'shows evidence of departure' if normal_p<.05 else 'does not show significant departure'} by Shapiro-Wilk."
             self.store_statistics_result("Regression diagnostics",text,table)
         except Exception as exc: QMessageBox.critical(self,"Regression diagnostics failed",str(exc))
-
     def statistics_report(self):
         if not self.statistics_results: QMessageBox.information(self,"Statistics report","Run a Statistics Studio analysis first."); return
         lines=["STATISTICS STUDIO REPORT","="*70,f"Dataset: {self.active_dataset}",""]
         for name,result in self.statistics_results.items(): lines.extend([name.upper(),"-"*len(name),result.get("text",""),""])
         self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
-
     def map_pack_fields(self, pack, roles):
         df = self.model.dataframe
         mapping = {}
@@ -1374,13 +1306,11 @@ def predict_batch(request: PredictionRequest):
             if not ok: return None
             mapping[role] = None if value == "Skip" else value
         return mapping
-
     def save_pack_result(self, pack, result, narrative, metrics=None):
         name = self.unique_dataset_name(pack.lower().replace(" ", "_") + "_analysis")
         self.datasets[name] = result.copy(); self.active_dataset = name; self.model.set_dataframe(result)
         self.analytics_pack_results[pack] = {"dataset": name, "narrative": narrative, "metrics": metrics or []}
         self.refresh_dataset_list(select=name); self.refresh_status(); self.console.setPlainText(narrative + "\n\n" + result.head(50).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
-
     def run_hr_pack(self):
         roles = [("Employee ID", False), ("Department", False), ("Join date", False), ("Exit date", False), ("Salary", True), ("Status", False)]
         m = self.map_pack_fields("HR / Workforce", roles)
@@ -1402,7 +1332,6 @@ def predict_batch(request: PredictionRequest):
         narrative = f"HR / Workforce analysis\nCurrent records/headcount basis: {headcount:,}\nRecorded exits: {exits:,}\nIndicative attrition ratio: {attrition:.1%}"
         if m["Salary"]: narrative += f"\nAverage salary: {src[m['Salary']].mean():,.2f}\nTotal salary/payroll: {src[m['Salary']].sum():,.2f}"
         self.save_pack_result("HR Workforce", result, narrative, [{"name":"Headcount","value":headcount},{"name":"Attrition","value":attrition}])
-
     def run_finance_pack(self):
         roles=[("Period",False),("Category",False),("Budget",True),("Actual",True),("Revenue",True),("Cost",True)]
         m=self.map_pack_fields("Finance",roles)
@@ -1418,7 +1347,6 @@ def predict_batch(request: PredictionRequest):
         if m["Budget"] and m["Actual"]: narrative+=f"\nBudget: {budget:,.2f}\nActual: {actual:,.2f}\nVariance: {actual-budget:,.2f}"
         if m["Revenue"] and m["Cost"]: narrative+=f"\nRevenue: {revenue:,.2f}\nCost: {cost:,.2f}\nProfit: {revenue-cost:,.2f}\nMargin: {(revenue-cost)/max(abs(revenue),1):.1%}"
         self.save_pack_result("Finance",summary,narrative)
-
     def run_sales_pack(self):
         roles=[("Date",False),("Customer",False),("Product",False),("Region",False),("Revenue",True),("Quantity",True)]
         m=self.map_pack_fields("Sales",roles)
@@ -1432,7 +1360,6 @@ def predict_batch(request: PredictionRequest):
         if m["Customer"]: narrative+=f"\nDistinct customers: {src[m['Customer']].nunique():,}"
         if m["Product"]: narrative+=f"\nDistinct products: {src[m['Product']].nunique():,}"
         self.save_pack_result("Sales",result,narrative)
-
     def run_operations_pack(self):
         roles=[("Date/time",False),("Process / machine",False),("Output",True),("Defects",True),("Cycle time",True),("Capacity",True),("SLA met",False)]
         m=self.map_pack_fields("Operations",roles)
@@ -1449,10 +1376,8 @@ def predict_batch(request: PredictionRequest):
         if "defect_rate_pct" in src: narrative+=f"\nAverage defect rate: {src['defect_rate_pct'].mean():.2f}%"
         if m["Cycle time"]: narrative+=f"\nAverage cycle time: {src[m['Cycle time']].mean():,.2f}"
         self.save_pack_result("Operations",result,narrative)
-
     def open_pack_field_mapper(self):
         QMessageBox.information(self,"Pack field mapper","Choose any analytics pack. The mapping dialog lets you assign your dataset columns to standard business roles. Select Skip for unavailable fields.")
-
     def create_pack_dashboard(self):
         if not self.analytics_pack_results: QMessageBox.information(self,"Pack dashboard","Run an analytics pack first."); return
         pack,ok=QInputDialog.getItem(self,"Pack dashboard","Pack",list(self.analytics_pack_results),0,False)
@@ -1465,17 +1390,14 @@ def predict_batch(request: PredictionRequest):
         if cats and nums: dash["tiles"].append({"id":self.next_dashboard_tile_id(),"type":"chart","chart":"bar","title":f"{nums[0]} by {cats[0]}","x":cats[0],"y":nums[0],"width":2,"height":2,"enabled":True}); dash["slicers"].append({"column":cats[0],"value":None})
         dash["tiles"].append({"id":self.next_dashboard_tile_id(),"type":"table","title":"Analysis details","columns":list(df.columns)[:6],"width":3,"height":2,"enabled":True})
         self.dashboard_definitions[name]=dash; self.active_dashboard=name; self.render_dashboard_v2(); self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
-
     def next_dashboard_tile_id(self):
         self.dashboard_tile_counter += 1
         return f"tile_{self.dashboard_tile_counter:04d}"
-
     def ensure_dashboard_v2(self):
         if self.active_dashboard in self.dashboard_definitions:
             return self.dashboard_definitions[self.active_dashboard]
         self.new_dashboard_v2()
         return self.dashboard_definitions.get(self.active_dashboard)
-
     def new_dashboard_v2(self):
         name, ok = QInputDialog.getText(self, "New dashboard", "Dashboard name", text="Executive Dashboard")
         if not ok or not name.strip(): return
@@ -1484,7 +1406,6 @@ def predict_batch(request: PredictionRequest):
         self.dashboard_definitions[name] = {"name": name, "dataset": self.active_dataset, "tiles": [], "slicers": [], "schema_version": 2}
         self.active_dashboard = name
         self.render_dashboard_v2()
-
     def add_dashboard_kpi_tile(self):
         dash = self.ensure_dashboard_v2()
         if not dash: return
@@ -1498,7 +1419,6 @@ def predict_batch(request: PredictionRequest):
         if not ok: return
         dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "kpi", "title": title, "measure": measure, "width": 1, "height": 1, "enabled": True})
         self.render_dashboard_v2()
-
     def add_dashboard_chart_tile(self):
         dash = self.ensure_dashboard_v2()
         if not dash: return
@@ -1518,7 +1438,6 @@ def predict_batch(request: PredictionRequest):
         if not ok: return
         dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "chart", "chart": chart, "title": title, "x": x, "y": y, "width": 2, "height": 2, "enabled": True})
         self.render_dashboard_v2()
-
     def add_dashboard_table_tile(self):
         dash = self.ensure_dashboard_v2()
         if not dash: return
@@ -1529,7 +1448,6 @@ def predict_batch(request: PredictionRequest):
         if not cols: QMessageBox.warning(self, "Table", "No valid columns selected."); return
         dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "table", "title": "Details", "columns": cols, "width": 3, "height": 2, "enabled": True})
         self.render_dashboard_v2()
-
     def dashboard_context_df(self, dash):
         df = self.datasets.get(dash.get("dataset"), self.model.dataframe).copy()
         for slicer in dash.get("slicers", []):
@@ -1540,7 +1458,6 @@ def predict_batch(request: PredictionRequest):
             c, v = self.dashboard_cross_filter
             if c in df.columns: df = df[df[c].astype(str) == str(v)]
         return df
-
     def evaluate_dashboard_kpi(self, dash, measure, df):
         if measure.startswith("SUM::"):
             return df[measure.split("::",1)[1]].sum()
@@ -1548,7 +1465,6 @@ def predict_batch(request: PredictionRequest):
             return df[measure.split("::",1)[1]].mean()
         match = next((m for m in self.semantic_measures if m["name"] == measure), None)
         return self.calculate_semantic_measure(match, df) if match else None
-
     def render_dashboard_v2(self):
         if not hasattr(self, "dashboard_tiles_layout"): return
         while self.dashboard_tiles_layout.count():
@@ -1590,7 +1506,6 @@ def predict_batch(request: PredictionRequest):
             row.addWidget(frame); count += 1
             if count % 2 == 0: self.dashboard_tiles_layout.addLayout(row); row = QHBoxLayout()
         if count % 2: self.dashboard_tiles_layout.addLayout(row)
-
     def open_dashboard_layout_editor(self):
         dash = self.ensure_dashboard_v2()
         if not dash: return
@@ -1613,7 +1528,6 @@ def predict_batch(request: PredictionRequest):
             if ok and col and not any(x["column"]==col for x in dash["slicers"]): dash["slicers"].append({"column":col,"value":None}); self.render_dashboard_v2()
         for label,fn in [("Up",lambda:move(-1)),("Down",lambda:move(1)),("Enable/Disable",toggle),("Delete",delete),("Add slicer",slicer)]: b=QPushButton(label); b.clicked.connect(fn); controls.addWidget(b)
         done=QDialogButtonBox(QDialogButtonBox.Close); done.rejected.connect(d.reject); root.addWidget(done); refresh(); d.exec(); self.render_dashboard_v2()
-
     def dashboard_import_export(self):
         action,ok=QInputDialog.getItem(self,"Dashboard package","Action",["Export active dashboard","Import dashboard"],0,False)
         if not ok:return
@@ -1629,7 +1543,6 @@ def predict_batch(request: PredictionRequest):
                 if not dash.get("name") or not isinstance(dash.get("tiles"),list): raise ValueError("Invalid dashboard schema")
                 self.dashboard_definitions[dash["name"]]=dash; self.active_dashboard=dash["name"]; self.render_dashboard_v2()
             except Exception as exc: QMessageBox.critical(self,"Dashboard import failed",str(exc))
-
     def build_dashboard_page(self):
         page = QWidget(); outer = QVBoxLayout(page)
         top = QHBoxLayout(); title = QLabel("Analytics Dashboard"); title.setObjectName("pageTitle")
@@ -1647,12 +1560,10 @@ def predict_batch(request: PredictionRequest):
         self.dashboard_tiles_host = QWidget(); self.dashboard_tiles_layout = QVBoxLayout(self.dashboard_tiles_host); self.dashboard_tiles_layout.setAlignment(Qt.AlignTop)
         self.dashboard_tiles_area.setWidget(self.dashboard_tiles_host); outer.addWidget(self.dashboard_tiles_area, 1)
         return page
-
     def clear_layout(self, layout):
         while layout.count():
             item=layout.takeAt(0); widget=item.widget()
             if widget: widget.deleteLater()
-
     def refresh_dashboard(self):
         if not hasattr(self, "kpi_strip"): return
         df=self.dashboard_filtered_df()
@@ -1683,12 +1594,10 @@ def predict_batch(request: PredictionRequest):
             self.dashboard_figure.clear(); ax=self.dashboard_figure.add_subplot(111); col=numeric[0]; clean=df[col].dropna(); ax.hist(clean,bins=min(20,max(5,int(max(1,len(clean))**.5))),color="#2563eb",edgecolor="white"); ax.set_title(f"Distribution of {col}"); ax.set_xlabel(col); ax.set_ylabel("Frequency"); ax.grid(True,alpha=.2); self.dashboard_canvas.draw()
         else: self.dashboard_table_model.set_dataframe(pd.DataFrame({"message":["No numeric columns"]}))
         self.dashboard_insights.setPlainText(self.make_executive_summary())
-
     def apply_dashboard_filter_value(self,value):
         if not self.dashboard_filters:return
         self.dashboard_filters["value"]=None if value in ("","All") else value
         self.refresh_dashboard()
-
     def make_executive_summary(self):
         df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns); cats=list(df.select_dtypes(exclude=np.number).columns); lines=[f"Dataset {self.active_dataset} contains {len(df):,} rows and {len(df.columns)} columns.",f"Data quality: {int(df.isna().sum().sum())} missing cells and {int(df.duplicated().sum())} duplicate rows."]
         for c in numeric[:3]:
@@ -1698,35 +1607,28 @@ def predict_batch(request: PredictionRequest):
             c=cats[0]; top=df[c].value_counts(dropna=False)
             if len(top): lines.append(f"Largest {c} segment: {top.index[0]} with {top.iloc[0]:,} records ({top.iloc[0]/max(1,len(df))*100:.1f}%).")
         return "\n".join(lines)
-
     def kpi_summary(self):
         self.refresh_dashboard(); self.tabs.setCurrentWidget(self.tabs.widget(0) if self.tabs.tabText(0)=="Dashboard" else next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
-
     def segment_analysis(self):
         group=self.choose_column("Segment analysis - dimension"); value=self.choose_column("Segment analysis - measure",True)
         if group and value:
             result=self.model.dataframe.groupby(group,dropna=False)[value].agg(records="count",total="sum",average="mean",median="median").reset_index().sort_values("total",ascending=False); result["share_pct"]=(result["total"]/result["total"].sum()*100).round(2); self.apply_dataframe(result,f"Segment analysis: {value} by {group}")
-
     def trend_analysis(self):
         time_col=self.choose_column("Trend - date/time"); value=self.choose_column("Trend - measure",True)
         if time_col and value:
             raw=self.model.dataframe.copy(); raw[time_col]=pd.to_datetime(raw[time_col],errors="coerce"); freq,ok=QInputDialog.getItem(self,"Trend analysis","Frequency",["D","W","ME","QE","YE"],0,False)
             if not ok:return
             result=raw.dropna(subset=[time_col]).set_index(time_col)[value].resample(freq).sum().to_frame(value).reset_index(); result["previous"]=result[value].shift(1); result["growth_pct"]=(result[value].pct_change()*100).round(2); result["moving_avg_3"]=result[value].rolling(3,min_periods=1).mean().round(3); self.apply_dataframe(result,f"Trend analysis: {value} ({freq})")
-
     def pareto_analysis(self):
         category=self.choose_column("Pareto - category"); value=self.choose_column("Pareto - measure",True)
         if category and value:
             result=self.model.dataframe.groupby(category,dropna=False)[value].sum().reset_index().sort_values(value,ascending=False); total=result[value].sum(); result["share_pct"]=(result[value]/total*100).round(2); result["cumulative_pct"]=result["share_pct"].cumsum().round(2); self.apply_dataframe(result,f"Pareto analysis: {value} by {category}")
-
     def cohort_table(self):
         row=self.choose_column("Cohort table - row dimension"); col=self.choose_column("Cohort table - column dimension")
         if row and col and row!=col:
             result=pd.crosstab(self.model.dataframe[row],self.model.dataframe[col],margins=True).reset_index(); self.apply_dataframe(result,f"Cohort table: {row} x {col}")
-
     def executive_summary(self):
         self.console.setPlainText(self.make_executive_summary()); self.tabs.setCurrentWidget(self.python_page)
-
     def build_data_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -1748,13 +1650,11 @@ def predict_batch(request: PredictionRequest):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
         return page
-
     def duckdb_relation_sql(self, source):
         path = source["path"].replace("'", "''")
         if source["format"] == "parquet":
             return f"read_parquet('{path}')"
         return f"read_csv_auto('{path}', sample_size=-1, ignore_errors=true)"
-
     def attach_large_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Attach large data source", "", "Large data (*.parquet *.csv)")
         if not path: return
@@ -1767,13 +1667,11 @@ def predict_batch(request: PredictionRequest):
         self.lazy_sources[name] = {"name": name, "path": str(Path(path).resolve()), "format": suffix.lstrip("."), "engine": "DuckDB", "materialized": False}
         self.engine_selector.setCurrentText("DuckDB")
         QMessageBox.information(self, "Source attached", f"Attached '{name}' lazily. The file is not loaded into pandas.")
-
     def choose_lazy_source(self, title="Lazy source"):
         if not self.lazy_sources:
             QMessageBox.information(self, title, "Attach a CSV or Parquet source first."); return None
         name, ok = QInputDialog.getItem(self, title, "Source", list(self.lazy_sources), 0, False)
         return name if ok else None
-
     def lazy_source_manager(self):
         if not self.lazy_sources:
             QMessageBox.information(self, "Lazy sources", "No lazy sources are attached."); return
@@ -1783,7 +1681,6 @@ def predict_batch(request: PredictionRequest):
             except Exception: size = 0
             lines.append(f"{name} | {src['format'].upper()} | {size:,.1f} MB | {src['engine']} | {src['path']}")
         self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
-
     def query_lazy(self, name, query=None, limit=None):
         import duckdb
         src = self.lazy_sources[name]; relation = self.duckdb_relation_sql(src)
@@ -1791,7 +1688,6 @@ def predict_batch(request: PredictionRequest):
         if limit is not None: sql = f"SELECT * FROM ({sql}) AS q LIMIT {int(limit)}"
         con = duckdb.connect(database=":memory:")
         return con.execute(sql).fetchdf()
-
     def materialize_lazy_preview(self):
         name = self.choose_lazy_source("Materialize preview")
         if not name: return
@@ -1800,13 +1696,11 @@ def predict_batch(request: PredictionRequest):
         try:
             df = self.query_lazy(name, limit=rows); target = self.unique_dataset_name(name + "_preview"); self.datasets[target] = df; self.active_dataset = target; self.model.set_dataframe(df); self.lazy_sources[name]["materialized"] = True; self.refresh_dataset_list(select=target); self.refresh_status(); self.tabs.setCurrentWidget(self.data_page())
         except Exception as exc: QMessageBox.critical(self, "Materialization failed", str(exc))
-
     def large_data_sql(self):
         name = self.choose_lazy_source("Large-data SQL")
         if not name: return
         relation = self.duckdb_relation_sql(self.lazy_sources[name])
         self.sql_editor.setPlainText(f"SELECT * FROM {relation} LIMIT {self.preview_limit};"); self.tabs.setCurrentWidget(self.sql_page)
-
     def profile_lazy_source(self):
         name = self.choose_lazy_source("Profile lazy source")
         if not name: return
@@ -1819,7 +1713,6 @@ def predict_batch(request: PredictionRequest):
             self.console.setPlainText(f"Source: {name}\nRows: {count:,}\n\nSCHEMA\n{desc.to_string(index=False)}\n\nSAMPLE\n{sample.to_string(index=False)}")
             self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self, "Profile failed", str(exc))
-
     def pipeline_to_duckdb_sql(self, pipe, relation):
         current = f"SELECT * FROM {relation}"
         for step in pipe["steps"]:
@@ -1839,7 +1732,6 @@ def predict_batch(request: PredictionRequest):
                 expr = p["expression"]; name='"'+p["name"].replace('"','""')+'"'; current=f"SELECT *, ({expr}) AS {name} FROM ({current}) q"
             else: raise ValueError(f"Step '{op}' is not yet engine-routable through DuckDB")
         return current
-
     def run_pipeline_engine_routed(self):
         if not self.active_pipeline or self.active_pipeline not in self.pipeline_definitions:
             QMessageBox.information(self, "Engine-routed pipeline", "Create or import a pipeline first."); return
@@ -1851,17 +1743,14 @@ def predict_batch(request: PredictionRequest):
             con = duckdb.connect(database=":memory:"); count = con.execute(f"SELECT COUNT(*) FROM ({sql}) z").fetchone()[0]
             preview = con.execute(f"SELECT * FROM ({sql}) z LIMIT {self.preview_limit}").fetchdf(); self.last_sql_result = preview; self.sql_result_model.set_dataframe(preview); self.sql_editor.setPlainText(sql); self.sql_status.setText(f"DuckDB pipeline output: {count:,} rows. Showing {len(preview):,} rows."); self.tabs.setCurrentWidget(self.sql_page)
         except Exception as exc: QMessageBox.critical(self, "Engine-routed pipeline failed", str(exc))
-
     def ensure_pipeline(self):
         if self.active_pipeline in self.pipeline_definitions:
             return self.pipeline_definitions[self.active_pipeline]
         self.new_pipeline()
         return self.pipeline_definitions.get(self.active_pipeline)
-
     def next_step_id(self):
         self.pipeline_step_counter += 1
         return f"step_{self.pipeline_step_counter:04d}"
-
     def new_pipeline(self):
         name, ok = QInputDialog.getText(self, "New pipeline", "Pipeline name", text="Data preparation pipeline")
         if not ok or not name.strip(): return
@@ -1869,7 +1758,6 @@ def predict_batch(request: PredictionRequest):
         if name in self.pipeline_definitions and QMessageBox.question(self, "Replace pipeline", f"Replace '{name}'?") != QMessageBox.Yes: return
         self.pipeline_definitions[name] = {"name": name, "schema_version": 1, "source_dataset": self.active_dataset, "steps": []}
         self.active_pipeline = name
-
     def add_pipeline_step(self, operation, parameters, label=None):
         pipe = self.ensure_pipeline()
         if not pipe: return
@@ -1877,7 +1765,6 @@ def predict_batch(request: PredictionRequest):
         step = {"id": self.next_step_id(), "operation": operation, "label": label or operation.replace("_", " ").title(), "enabled": True, "parameters": parameters, "depends_on": depends}
         pipe["steps"].append(step)
         self.workflow.addItem(f"P{len(pipe['steps'])}. {step['label']}")
-
     def add_cleaning_step(self):
         op, ok = QInputDialog.getItem(self, "Cleaning step", "Operation", ["fill_missing", "drop_duplicates", "infer_types", "clean_text", "drop_missing_rows"], 0, False)
         if not ok: return
@@ -1893,7 +1780,6 @@ def predict_batch(request: PredictionRequest):
             if not ok: return
             params = {"column": None if col == "Any column" else col}
         self.add_pipeline_step(op, params)
-
     def add_filter_step(self):
         df = self.model.dataframe
         col, ok = QInputDialog.getItem(self, "Filter step", "Column", list(df.columns), 0, False)
@@ -1903,14 +1789,12 @@ def predict_batch(request: PredictionRequest):
         default = str(df[col].dropna().iloc[0]) if df[col].notna().any() else ""
         value, ok = QInputDialog.getText(self, "Filter step", "Value; comma-separated for 'in'", text=default)
         if ok: self.add_pipeline_step("filter", {"column": col, "operator": op, "value": value}, f"Filter {col} {op} {value}")
-
     def add_calculated_pipeline_step(self):
         name, ok = QInputDialog.getText(self, "Calculated step", "New column", text="calculated_value")
         if not ok or not name.strip(): return
         example = "output / pressure" if {"output", "pressure"}.issubset(self.model.dataframe.columns) else ""
         expr, ok = QInputDialog.getText(self, "Calculated step", "pandas expression", text=example)
         if ok and expr.strip(): self.add_pipeline_step("calculated_column", {"name": name.strip(), "expression": expr}, f"Calculate {name.strip()}")
-
     def execute_pipeline_step(self, df, step):
         if not step.get("enabled", True): return df.copy()
         out = df.copy(); op = step["operation"]; p = step.get("parameters", {})
@@ -1949,7 +1833,6 @@ def predict_batch(request: PredictionRequest):
             out = out.loc[mask].reset_index(drop=True)
         else: raise ValueError(f"Unsupported operation: {op}")
         return out
-
     def execute_pipeline(self, name=None, source_df=None, through_step=None):
         name = name or self.active_pipeline
         if name not in self.pipeline_definitions: raise ValueError("No active pipeline")
@@ -1961,7 +1844,6 @@ def predict_batch(request: PredictionRequest):
             audit.append({"step": step["id"], "label": step["label"], "enabled": step.get("enabled", True), "rows_before": before[0], "rows_after": len(result), "cols_before": before[1], "cols_after": len(result.columns)})
             if through_step is not None and i >= through_step: break
         return result, pd.DataFrame(audit)
-
     def open_pipeline_editor(self):
         pipe = self.ensure_pipeline()
         if not pipe: return
@@ -1994,7 +1876,6 @@ def predict_batch(request: PredictionRequest):
         for label, fn in [("Up", lambda: move(-1)), ("Down", lambda: move(1)), ("Enable/Disable", toggle), ("Delete", delete), ("Preview selected", lambda: preview(False)), ("Run all", lambda: preview(True)), ("Apply", apply)]:
             b = QPushButton(label); b.clicked.connect(fn); buttons.addWidget(b)
         refresh(); d.exec()
-
     def pipeline_import_export_dialog(self):
         action, ok = QInputDialog.getItem(self, "Pipeline JSON", "Action", ["Export active pipeline", "Import pipeline"], 0, False)
         if not ok: return
@@ -2012,7 +1893,6 @@ def predict_batch(request: PredictionRequest):
                 if bad: raise ValueError("Unsupported operations: " + ", ".join(map(str, bad)))
                 self.pipeline_definitions[pipe["name"]] = pipe; self.active_pipeline = pipe["name"]
             except Exception as exc: QMessageBox.critical(self, "Import failed", str(exc))
-
     def relationship_manager(self):
         if len(self.datasets) < 2:
             QMessageBox.information(self, "Relationships", "Import at least two datasets first."); return
@@ -2033,7 +1913,6 @@ def predict_batch(request: PredictionRequest):
             rel={"from_dataset":left_ds.currentText(),"from_column":left_col.currentText(),"to_dataset":right_ds.currentText(),"to_column":right_col.currentText(),"cardinality":cardinality.currentText(),"active":True}
             self.relationships=[x for x in self.relationships if not (x["from_dataset"]==rel["from_dataset"] and x["from_column"]==rel["from_column"] and x["to_dataset"]==rel["to_dataset"] and x["to_column"]==rel["to_column"])]; self.relationships.append(rel); dialog.accept()
         left_ds.currentTextChanged.connect(refresh_cols); right_ds.currentTextChanged.connect(refresh_cols); left_col.currentTextChanged.connect(validate); right_col.currentTextChanged.connect(validate); buttons.accepted.connect(save); buttons.rejected.connect(dialog.reject); refresh_cols(); dialog.exec()
-
     def suggest_relationships(self):
         suggestions=[]; names=list(self.datasets)
         for i,a in enumerate(names):
@@ -2057,7 +1936,6 @@ def predict_batch(request: PredictionRequest):
                     if "candidate" not in x["cardinality"]:
                         rel={k:x[k] for k in ["from_dataset","from_column","to_dataset","to_column","cardinality"]}; rel["active"]=True
                         if rel not in self.relationships:self.relationships.append(rel)
-
     def define_calculated_column(self):
         df=self.model.dataframe
         name,ok=QInputDialog.getText(self,"Calculated column","New column name",text="calculated_value")
@@ -2068,7 +1946,6 @@ def predict_batch(request: PredictionRequest):
         try:
             result=df.copy(); result[name.strip()]=result.eval(expr); definition={"dataset":self.active_dataset,"name":name.strip(),"expression":expr}; self.calculated_columns=[x for x in self.calculated_columns if not (x["dataset"]==self.active_dataset and x["name"]==name.strip())]; self.calculated_columns.append(definition); self.apply_dataframe(result,f"Calculated column {name.strip()}")
         except Exception as exc: QMessageBox.critical(self,"Calculated column failed",str(exc))
-
     def define_semantic_measure(self):
         df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns)
         if not numeric: QMessageBox.warning(self,"Measure","No numeric columns available."); return
@@ -2086,20 +1963,17 @@ def predict_batch(request: PredictionRequest):
             if not ok:return
         definition={"name":name.strip(),"dataset":self.active_dataset,"column":column,"aggregation":aggregation,"filter_column":None if filter_col=="No filter" else filter_col,"filter_value":filter_value}
         self.semantic_measures=[x for x in self.semantic_measures if x["name"]!=definition["name"]]; self.semantic_measures.append(definition); QMessageBox.information(self,"Measure saved",f"Saved semantic measure '{definition['name']}'.")
-
     def calculate_semantic_measure(self, definition, context=None):
         df=(context.copy() if context is not None else self.datasets[definition["dataset"]].copy())
         fc=definition.get("filter_column"); fv=definition.get("filter_value")
         if fc and fc in df.columns: df=df[df[fc].astype(str)==str(fv)]
         s=df[definition["column"]]; agg=definition["aggregation"]; return s.nunique() if agg=="nunique" else getattr(s,agg)()
-
     def evaluate_measure_dialog(self):
         valid=[m for m in self.semantic_measures if m.get("dataset") in self.datasets]
         if not valid: QMessageBox.information(self,"Measures","Define a semantic measure first."); return
         name,ok=QInputDialog.getItem(self,"Evaluate measure","Measure",[m["name"] for m in valid],0,False)
         if not ok:return
         definition=next(m for m in valid if m["name"]==name); value=self.calculate_semantic_measure(definition); QMessageBox.information(self,"Measure result",f"{name}\n\n{value:,.4f}" if isinstance(value,(int,float,np.number)) else f"{name}\n\n{value}")
-
     def model_overview(self):
         lines=["SEMANTIC DATA MODEL","="*60,"","DATASETS"]
         for n,df in self.datasets.items(): lines.append(f"• {n}: {len(df):,} rows × {len(df.columns)} columns")
@@ -2108,23 +1982,19 @@ def predict_batch(request: PredictionRequest):
         lines.extend(["","CALCULATED COLUMNS"]); lines.extend([f"• {x['dataset']}.{x['name']} = {x['expression']}" for x in self.calculated_columns] or ["• None defined"])
         lines.extend(["","MEASURES"]); lines.extend([f"• {m['name']}: {m['aggregation'].upper()}({m['dataset']}.{m['column']})" + (f" where {m['filter_column']} = {m['filter_value']}" if m.get('filter_column') else "") for m in self.semantic_measures] or ["• None defined"])
         self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
-
     def change_engine(self, name):
         self.compute_engine = name
         self.update_engine_badge()
-
     def recommended_engine(self):
         rows=len(self.model.dataframe)
         if self.compute_engine != "Auto": return self.compute_engine
         if rows < self.engine_threshold_rows: return "pandas"
         return "DuckDB"
-
     def update_engine_badge(self):
         if not hasattr(self,"engine_badge"): return
         actual=self.recommended_engine()
         label=f"Auto: {actual}" if self.compute_engine=="Auto" else actual
         self.engine_badge.setText(label)
-
     def get_spark(self):
         if self.spark_session is not None: return self.spark_session
         try:
@@ -2133,18 +2003,15 @@ def predict_batch(request: PredictionRequest):
             return self.spark_session
         except Exception as exc:
             raise RuntimeError("PySpark is optional and could not start. Install Java 17 and the optional PySpark package. Details: " + str(exc))
-
     def show_engine_status(self):
         df=self.model.dataframe; memory=int(df.memory_usage(deep=True).sum())
         text=f"Configured engine: {self.compute_engine}\nRecommended engine: {self.recommended_engine()}\nRows: {len(df):,}\nColumns: {len(df.columns)}\nIn-memory size: {memory/1024/1024:,.2f} MB\nAuto threshold: {self.engine_threshold_rows:,} rows\n\nDecision policy:\n- pandas: editable GUI work and small/medium analysis\n- DuckDB: SQL, Parquet and larger local analytics\n- PySpark: optional distributed processing when a Spark cluster is available"
         self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
-
     def convert_to_spark(self):
         try:
             spark=self.get_spark(); sdf=spark.createDataFrame(self.model.dataframe); view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset); sdf.createOrReplaceTempView(view); self.spark_frames = getattr(self, "spark_frames", {}); self.spark_frames[view]=sdf
             self.console.setPlainText(f"Created Spark DataFrame '{view}' with {sdf.count():,} rows and {len(sdf.columns)} columns.\nTemporary SQL view registered as {view}."); self.tabs.setCurrentWidget(self.python_page); self.engine_selector.setCurrentText("PySpark")
         except Exception as exc: QMessageBox.critical(self,"Spark conversion failed",str(exc))
-
     def run_spark_sql_dialog(self):
         try:
             spark=self.get_spark(); view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
@@ -2153,14 +2020,12 @@ def predict_batch(request: PredictionRequest):
             if not ok:return
             result=spark.sql(query); limit=min(result.count(),100000); pdf=result.limit(limit).toPandas(); self.last_sql_result=pdf; self.sql_result_model.set_dataframe(pdf); self.sql_status.setText(f"Spark SQL returned {limit:,} preview rows. Save result to create a GUI dataset."); self.tabs.setCurrentWidget(self.sql_page)
         except Exception as exc: QMessageBox.critical(self,"Spark SQL failed",str(exc))
-
     def cache_spark_dataset(self):
         try:
             view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
             if not hasattr(self,"spark_frames") or view not in self.spark_frames:self.convert_to_spark()
             frame=self.spark_frames[view].cache(); count=frame.count(); QMessageBox.information(self,"Spark cache",f"Cached {count:,} rows for '{view}'.")
         except Exception as exc: QMessageBox.critical(self,"Spark cache failed",str(exc))
-
     def explain_execution_plan(self):
         try:
             engine=self.recommended_engine()
@@ -2173,7 +2038,6 @@ def predict_batch(request: PredictionRequest):
                 con=duckdb.connect(database=":memory:"); con.register("active_data",self.model.dataframe); plan=con.execute("EXPLAIN SELECT * FROM active_data").fetchdf().to_string(index=False)
             self.console.setPlainText(plan); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"Explain plan failed",str(exc))
-
     def collect_spark_to_pandas(self):
         try:
             view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
@@ -2186,7 +2050,6 @@ def predict_batch(request: PredictionRequest):
             else:result=self.spark_frames[view].toPandas()
             self.apply_dataframe(result,"Collect Spark result to pandas"); self.engine_selector.setCurrentText("pandas")
         except Exception as exc: QMessageBox.critical(self,"Spark collect failed",str(exc))
-
     def build_sql_page(self):
         page=QWidget(); layout=QVBoxLayout(page)
         head=QHBoxLayout(); title=QLabel("DuckDB SQL Workspace"); title.setObjectName("pageTitle")
@@ -2200,16 +2063,13 @@ def predict_batch(request: PredictionRequest):
         split.addWidget(self.sql_editor); split.addWidget(self.sql_result_table); split.setSizes([220,480]); layout.addWidget(split,1)
         self.sql_status=QLabel("DuckDB queries can reference every project dataset by its dataset name."); self.sql_status.setObjectName("muted"); layout.addWidget(self.sql_status)
         self.last_sql_result=pd.DataFrame(); self.refresh_sql_tables(); return page
-
     def refresh_sql_tables(self):
         if not hasattr(self,"sql_tables"): return
         current=self.sql_tables.currentText(); self.sql_tables.blockSignals(True); self.sql_tables.clear(); self.sql_tables.addItems(list(self.datasets));
         if current in self.datasets:self.sql_tables.setCurrentText(current)
         self.sql_tables.blockSignals(False)
-
     def insert_sql_table(self,name):
         if name and hasattr(self,"sql_editor") and not self.sql_editor.toPlainText().strip(): self.sql_editor.setPlainText(f'SELECT * FROM "{name}" LIMIT 100;')
-
     def run_sql(self):
         try:
             import duckdb
@@ -2221,13 +2081,11 @@ def predict_batch(request: PredictionRequest):
             self.sql_status.setText(f"Query complete: {len(self.last_sql_result):,} rows × {len(self.last_sql_result.columns)} columns")
             self.workflow.addItem(f"{self.workflow.count()+1}. Run DuckDB SQL")
         except Exception as exc: self.sql_status.setText(f"SQL error: {exc}")
-
     def save_sql_result(self):
         if self.last_sql_result is None or self.last_sql_result.empty: QMessageBox.information(self,"SQL result","Run a query that returns rows first."); return
         name,ok=QInputDialog.getText(self,"Save SQL result","Dataset name",text="sql_result")
         if ok and name.strip():
             name=self.unique_dataset_name(name.strip()); self.datasets[name]=self.last_sql_result.copy(); self.active_dataset=name; self.model.set_dataframe(self.datasets[name]); self.refresh_dataset_list(select=name); self.refresh_sql_tables(); self.refresh_status()
-
     def build_chart_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -2248,7 +2106,6 @@ def predict_batch(request: PredictionRequest):
         layout.addWidget(self.canvas, 1)
         self.refresh_chart_columns()
         return page
-
     def build_python_page(self):
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -2282,7 +2139,6 @@ def predict_batch(request: PredictionRequest):
         self.python_base_df = self.model.dataframe.copy()
         self.update_variable_explorer({"df": self.model.dataframe})
         return page
-
     def refresh_chart_columns(self):
         if not hasattr(self, "chart_x"):
             return
@@ -2294,7 +2150,6 @@ def predict_batch(request: PredictionRequest):
         self.chart_group.addItems([str(c) for c in df.select_dtypes(exclude=np.number).columns])
         if current_x in list(df.columns): self.chart_x.setCurrentText(current_x)
         if current_y in list(df.columns): self.chart_y.setCurrentText(current_y)
-
     def create_chart(self):
         df = self.model.dataframe.copy(); kind = self.chart_type.currentText(); x = self.chart_x.currentText(); y = self.chart_y.currentText(); group = self.chart_group.currentText()
         self.figure.clear(); ax = self.figure.add_subplot(111)
@@ -2328,11 +2183,9 @@ def predict_batch(request: PredictionRequest):
             ax.grid(True, alpha=.2); self.canvas.draw(); self.tabs.setCurrentWidget(self.chart_page)
             self.workflow.addItem(f"{self.workflow.count()+1}. Create {kind.lower()}")
         except Exception as exc: QMessageBox.critical(self, "Chart failed", str(exc))
-
     def export_chart(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export chart", "chart.png", "PNG (*.png);;SVG (*.svg);;PDF (*.pdf)")
         if path: self.figure.savefig(path, dpi=180, bbox_inches="tight")
-
     def load_python_template(self, name):
         templates = {
             "Clean data": "# Clean missing values and duplicates\ndf = df.drop_duplicates().copy()\nfor col in df.select_dtypes(include='number'):\n    df[col] = df[col].fillna(df[col].median())\ndf",
@@ -2342,7 +2195,6 @@ def predict_batch(request: PredictionRequest):
             "Machine learning": "from sklearn.ensemble import RandomForestRegressor\nfeatures = ['temperature','pressure','vibration']\ntarget = 'output'\ntrain = df[features + [target]].dropna()\nmodel = RandomForestRegressor(n_estimators=100, random_state=42)\nmodel.fit(train[features], train[target])\ndf.loc[train.index, 'ml_prediction'] = model.predict(train[features])\ndf"
         }
         if name in templates: self.editor.setPlainText(templates[name])
-
     def execute_python_code(self, code, label):
         namespace = {"df": self.model.dataframe.copy(), "pd": pd, "np": np}
         try:
@@ -2361,19 +2213,15 @@ def predict_batch(request: PredictionRequest):
         except Exception:
             self.console.setPlainText(traceback.format_exc()); self.execution_history.insertItem(0, f"Failed: {label}")
         self.refresh_status()
-
     def run_selection(self):
         selected = self.editor.textCursor().selectedText().replace("\u2029", "\n")
         if not selected.strip(): QMessageBox.information(self, "Run selection", "Select Python code in the editor first."); return
         self.execute_python_code(selected, "Run Python selection")
-
     def reset_python_df(self):
         self.model.set_dataframe(self.python_base_df.copy()); self.console.setPlainText("df reset to the dataset captured when Python Lab opened."); self.refresh_status()
-
     def save_python_script(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Python script", "analysis.py", "Python (*.py)")
         if path: Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
-
     def update_variable_explorer(self, values):
         if not hasattr(self, "variable_list"): return
         self.variable_list.clear()
@@ -2384,7 +2232,6 @@ def predict_batch(request: PredictionRequest):
             elif isinstance(value, np.ndarray): detail=f"ndarray {value.shape}"
             else: detail=type(value).__name__
             self.variable_list.addItem(f"{name}  |  {detail}")
-
     def select_tool(self, name):
         handlers = {
             "Create job": self.jobs_create,
@@ -2512,12 +2359,10 @@ def predict_batch(request: PredictionRequest):
             handlers[name]()
         else:
             QMessageBox.information(self, name, f"{name} is positioned in the interface and ready for its Python processing module.")
-
     def push_history(self):
         self.history.append(self.model.dataframe.copy())
         if len(self.history) > 20:
             self.history.pop(0)
-
     def apply_dataframe(self, df, step):
         self.push_history()
         self.model.set_dataframe(df)
@@ -2526,13 +2371,11 @@ def predict_batch(request: PredictionRequest):
         self.workflow.addItem(f"{self.workflow.count()+1}. {step}")
         self.tabs.setCurrentIndex(self.tabs.indexOf(self.data_page()) if self.data_page() else 5)
         self.refresh_status()
-
     def data_page(self):
         for i in range(self.tabs.count()):
             if self.tabs.tabText(i) == "Data Grid":
                 return self.tabs.widget(i)
         return None
-
     def fill_missing(self):
         df = self.model.dataframe.copy()
         numeric = df.select_dtypes(include=np.number).columns
@@ -2543,10 +2386,8 @@ def predict_batch(request: PredictionRequest):
                 mode = df[col].mode()
                 df[col] = df[col].fillna(mode.iloc[0] if not mode.empty else "")
         self.apply_dataframe(df, "Fill missing values")
-
     def remove_duplicates(self):
         self.apply_dataframe(self.model.dataframe.drop_duplicates().reset_index(drop=True), "Remove duplicates")
-
     def infer_types(self):
         df = self.model.dataframe.copy()
         for col in df.columns:
@@ -2555,13 +2396,11 @@ def predict_batch(request: PredictionRequest):
                 if converted.notna().sum() >= max(1, int(len(df) * .8)):
                     df[col] = converted
         self.apply_dataframe(df, "Infer data types")
-
     def clean_text(self):
         df = self.model.dataframe.copy()
         for col in df.select_dtypes(include="object"):
             df[col] = df[col].astype(str).str.strip().replace("nan", np.nan)
         self.apply_dataframe(df, "Clean text")
-
     def detect_outliers(self):
         df = self.model.dataframe.copy()
         numeric = list(df.select_dtypes(include=np.number).columns)
@@ -2572,24 +2411,19 @@ def predict_batch(request: PredictionRequest):
             flags |= (df[col] < q1 - 1.5 * iqr) | (df[col] > q3 + 1.5 * iqr)
         df["is_outlier"] = flags
         self.apply_dataframe(df, "Detect IQR outliers")
-
     def show_profile(self):
         self.console.setPlainText(self.model.dataframe.describe(include="all").transpose().to_string())
         self.tabs.setCurrentWidget(self.python_page)
-
     def show_correlation(self):
         result = self.model.dataframe.select_dtypes(include=np.number).corr().round(3)
         self.console.setPlainText(result.to_string())
         self.tabs.setCurrentWidget(self.python_page)
-
     def matrix_summary(self):
         numeric = self.model.dataframe.select_dtypes(include=np.number)
         self.console.setPlainText(f"Shape: {numeric.shape}\nRank: {np.linalg.matrix_rank(numeric.fillna(0).to_numpy())}\n\nCovariance:\n{numeric.cov().round(3)}")
         self.tabs.setCurrentWidget(self.python_page)
-
     def run_python(self):
         self.execute_python_code(self.editor.toPlainText(), "Run Python Lab")
-
     def train_model_dialog(self):
         try:
             from sklearn.compose import ColumnTransformer
@@ -2616,7 +2450,6 @@ def predict_batch(request: PredictionRequest):
             df[f"ml_prediction_{target}"]=model.predict(df.drop(columns=[target]))
             self.apply_dataframe(df,f"Train Random Forest for {target}"); self.console.setPlainText(report); self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc: QMessageBox.critical(self,"Model training failed",str(exc))
-
     def compare_models(self):
         try:
             from sklearn.model_selection import cross_val_score
@@ -2635,7 +2468,6 @@ def predict_batch(request: PredictionRequest):
                 pipe=make_pipeline(SimpleImputer(strategy="median"),StandardScaler(),est); scores=cross_val_score(pipe,X,y,cv=cv,scoring="neg_mean_absolute_error"); rows.append({"model":name,"MAE_mean":-scores.mean(),"MAE_std":scores.std()})
             result=pd.DataFrame(rows).sort_values("MAE_mean").reset_index(drop=True); self.apply_dataframe(result,f"Compare regression models for {target}")
         except Exception as exc: QMessageBox.critical(self,"Model comparison failed",str(exc))
-
     def choose_column(self, title, numeric=False):
         df = self.model.dataframe
         columns = list(df.select_dtypes(include=np.number).columns) if numeric else list(df.columns)
@@ -2644,14 +2476,12 @@ def predict_batch(request: PredictionRequest):
             return None
         value, ok = QInputDialog.getItem(self, title, "Column", columns, 0, False)
         return value if ok else None
-
     def choose_two_numeric(self, title):
         first = self.choose_column(title + " - X", True)
         if not first:
             return None, None
         second = self.choose_column(title + " - Y", True)
         return (first, second) if second else (None, None)
-
     def join_tables(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select table to join", "", "Data files (*.csv *.xlsx *.json *.parquet)")
         if not path:
@@ -2668,7 +2498,6 @@ def predict_batch(request: PredictionRequest):
                 self.apply_dataframe(result, f"Left join on {key}")
         except Exception as exc:
             QMessageBox.critical(self, "Join failed", str(exc))
-
     def pivot_table(self):
         df = self.model.dataframe
         category = self.choose_column("Pivot - group column")
@@ -2677,14 +2506,12 @@ def predict_batch(request: PredictionRequest):
             result = df.pivot_table(index=category, values=value, aggfunc=["count", "mean", "sum"]).reset_index()
             result.columns = ["_".join(str(x) for x in c if x).strip("_") if isinstance(c, tuple) else str(c) for c in result.columns]
             self.apply_dataframe(result, f"Pivot {value} by {category}")
-
     def group_analysis(self):
         category = self.choose_column("Group analysis - category")
         value = self.choose_column("Group analysis - numeric measure", True)
         if category and value:
             result = self.model.dataframe.groupby(category, dropna=False)[value].agg(["count", "mean", "median", "min", "max", "sum"]).reset_index()
             self.apply_dataframe(result, f"Group {value} by {category}")
-
     def time_patterns(self):
         df = self.model.dataframe.copy()
         time_col = self.choose_column("Time patterns - date/time")
@@ -2694,7 +2521,6 @@ def predict_batch(request: PredictionRequest):
             result = df.dropna(subset=[time_col]).set_index(time_col)[value].resample("h").mean().interpolate().to_frame("mean").reset_index()
             result["rolling_3"] = result["mean"].rolling(3, min_periods=1).mean()
             self.apply_dataframe(result, f"Hourly time pattern for {value}")
-
     def hypothesis_test(self):
         try:
             from scipy import stats
@@ -2712,7 +2538,6 @@ def predict_batch(request: PredictionRequest):
             self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc:
             QMessageBox.critical(self, "Test failed", str(exc))
-
     def regression(self):
         try:
             from scipy import stats
@@ -2727,7 +2552,6 @@ def predict_batch(request: PredictionRequest):
             self.console.setPlainText(f"Linear regression\n{y} = {fit.intercept:.4f} + {fit.slope:.4f} * {x}\nR-squared: {fit.rvalue**2:.4f}\np-value: {fit.pvalue:.6g}")
         except Exception as exc:
             QMessageBox.critical(self, "Regression failed", str(exc))
-
     def quality_control(self):
         col = self.choose_column("Quality control", True)
         if col:
@@ -2736,7 +2560,6 @@ def predict_batch(request: PredictionRequest):
             df[f"{col}_zscore"] = (df[col] - mean) / std
             df[f"{col}_outside_3sigma"] = df[f"{col}_zscore"].abs() > 3
             self.apply_dataframe(df, f"3-sigma control limits for {col}")
-
     def feature_engineering(self):
         x, y = self.choose_two_numeric("Feature engineering")
         if x:
@@ -2745,7 +2568,6 @@ def predict_batch(request: PredictionRequest):
             df[f"{x}_div_{y}"] = df[x] / df[y].replace(0, np.nan)
             df[f"{x}_zscore"] = (df[x] - df[x].mean()) / df[x].std()
             self.apply_dataframe(df, f"Engineer features from {x} and {y}")
-
     def predict_model(self):
         try:
             from sklearn.ensemble import RandomForestRegressor
@@ -2764,7 +2586,6 @@ def predict_batch(request: PredictionRequest):
             self.apply_dataframe(df, f"Random Forest prediction for {target}")
         except Exception as exc:
             QMessageBox.critical(self, "Prediction failed", str(exc))
-
     def forecast(self):
         value = self.choose_column("Forecast measure", True)
         if value:
@@ -2777,7 +2598,6 @@ def predict_batch(request: PredictionRequest):
             if "status" in row: row["status"] = "Forecast"
             df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
             self.apply_dataframe(df, f"Moving-average forecast for {value}")
-
     def cluster_data(self):
         try:
             from sklearn.cluster import KMeans
@@ -2791,7 +2611,6 @@ def predict_batch(request: PredictionRequest):
             self.apply_dataframe(df, f"K-means clustering ({k} clusters)")
         except Exception as exc:
             QMessageBox.critical(self, "Clustering failed", str(exc))
-
     def ml_anomaly(self):
         try:
             from sklearn.ensemble import IsolationForest
@@ -2802,7 +2621,6 @@ def predict_batch(request: PredictionRequest):
             self.apply_dataframe(df, "Isolation Forest anomalies")
         except Exception as exc:
             QMessageBox.critical(self, "Anomaly detection failed", str(exc))
-
     def signal_processing(self):
         try:
             from scipy.signal import savgol_filter
@@ -2818,7 +2636,6 @@ def predict_batch(request: PredictionRequest):
             self.apply_dataframe(df, f"Savitzky-Golay smoothing for {col}")
         except Exception as exc:
             QMessageBox.critical(self, "Signal processing failed", str(exc))
-
     def optimize_process(self):
         try:
             from scipy.optimize import minimize_scalar
@@ -2833,7 +2650,6 @@ def predict_batch(request: PredictionRequest):
             self.tabs.setCurrentWidget(self.python_page)
         except Exception as exc:
             QMessageBox.critical(self, "Optimization failed", str(exc))
-
     def monte_carlo(self):
         col = self.choose_column("Monte Carlo simulation", True)
         if col:
@@ -2842,14 +2658,12 @@ def predict_batch(request: PredictionRequest):
             simulations = rng.normal(values.mean(), values.std(ddof=1), 10000)
             summary = pd.DataFrame({"metric": ["mean", "std", "p05", "p50", "p95"], "value": [simulations.mean(), simulations.std(), *np.quantile(simulations, [.05, .5, .95])]})
             self.apply_dataframe(summary, f"Monte Carlo simulation for {col}")
-
     def unique_dataset_name(self, base):
         name = base or "dataset"
         counter = 2
         while name in self.datasets:
             name = f"{base}_{counter}"; counter += 1
         return name
-
     def refresh_dataset_list(self, select=None):
         if not hasattr(self, "dataset_list"): return
         target = select or self.active_dataset
@@ -2861,7 +2675,6 @@ def predict_batch(request: PredictionRequest):
             self.dataset_list.addItem(item)
             if name == target: self.dataset_list.setCurrentItem(item)
         self.dataset_list.blockSignals(False)
-
     def switch_dataset(self):
         item = self.dataset_list.currentItem() if hasattr(self, "dataset_list") else None
         if not item: return
@@ -2873,7 +2686,6 @@ def predict_batch(request: PredictionRequest):
         self.python_base_df = self.model.dataframe.copy()
         self.refresh_sql_tables()
         self.refresh_status()
-
     def remove_dataset(self):
         if len(self.datasets) <= 1:
             QMessageBox.warning(self, "Remove dataset", "A project must retain at least one dataset."); return
@@ -2884,18 +2696,17 @@ def predict_batch(request: PredictionRequest):
         self.active_dataset = next(iter(self.datasets))
         self.model.set_dataframe(self.datasets[self.active_dataset])
         self.refresh_dataset_list(); self.refresh_status()
-
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save project", "workbench_project.pdw", "Python Data Workbench (*.pdw)")
         if not path: return
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter}
+            payload = {"version": "0.20", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            self.current_project_path = str(Path(path).resolve())
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
-
     def open_project(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Python Data Workbench (*.pdw)")
         if not path: return
@@ -2943,6 +2754,7 @@ def predict_batch(request: PredictionRequest):
             self.scheduled_jobs = payload.get("scheduled_jobs", {})
             self.job_runs = payload.get("job_runs", [])
             self.job_counter = payload.get("job_counter", 0)
+            self.current_project_path = str(Path(path).resolve())
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
@@ -2950,7 +2762,6 @@ def predict_batch(request: PredictionRequest):
             for i, step in enumerate(self.pipeline_steps, 1): self.workflow.addItem(f"{i}. [{step.get('dataset','')}] {step.get('step','')}")
             self.refresh_dataset_list(); self.refresh_sql_tables(); self.refresh_status()
         except Exception as exc: QMessageBox.critical(self, "Open project failed", str(exc))
-
     def save_trained_model(self):
         if not self.trained_models:
             QMessageBox.information(self, "Save model", "Train a model first."); return
@@ -2960,7 +2771,6 @@ def predict_batch(request: PredictionRequest):
         if path:
             with open(path, "wb") as handle: pickle.dump(self.trained_models[target], handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Model saved: {path}", 5000)
-
     def batch_predict(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose saved model", "", "Pickle model (*.pkl)")
         if not path: return
@@ -2973,11 +2783,9 @@ def predict_batch(request: PredictionRequest):
             df[f"prediction_{target}"] = model.predict(df[features])
             self.apply_dataframe(df, f"Batch predict {target}")
         except Exception as exc: QMessageBox.critical(self, "Batch prediction failed", str(exc))
-
     def export_pipeline(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export workflow", "workflow.json", "JSON (*.json)")
         if path: Path(path).write_text(json.dumps(self.pipeline_steps, indent=2), encoding="utf-8")
-
     def import_data(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import data", "", "Data files (*.csv *.xlsx *.xls *.json *.parquet)")
         if not path:
@@ -3000,7 +2808,6 @@ def predict_batch(request: PredictionRequest):
             self.tabs.setCurrentWidget(self.data_page())
         except Exception as exc:
             QMessageBox.critical(self, "Import failed", str(exc))
-
     def export_data(self):
         path, selected = QFileDialog.getSaveFileName(self, "Export data", "processed_data.xlsx", "Excel (*.xlsx);;CSV (*.csv);;Parquet (*.parquet)")
         if not path:
@@ -3013,17 +2820,14 @@ def predict_batch(request: PredictionRequest):
             self.statusBar().showMessage(f"Exported {path}", 5000)
         except Exception as exc:
             QMessageBox.critical(self, "Export failed", str(exc))
-
     def snapshot(self):
         self.push_history()
         self.statusBar().showMessage("Snapshot saved for Undo", 3000)
-
     def undo(self):
         if self.history:
             self.model.set_dataframe(self.history.pop())
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
             self.workflow.addItem(f"{self.workflow.count()+1}. Undo")
-
     def refresh_status(self):
         df = self.model.dataframe
         missing = int(df.isna().sum().sum()) if not df.empty else 0
@@ -3039,7 +2843,6 @@ def predict_batch(request: PredictionRequest):
         if hasattr(self, "dashboard_summary"): self.refresh_dashboard()
         self.update_engine_badge()
         self.status_label.setText(f"{len(df):,} rows  |  {len(df.columns)} columns  |  Quality {score}%")
-
     def apply_styles(self):
         self.setStyleSheet("""
             QMainWindow, QWidget { background: #f6f8fb; color: #182230; font-family: Segoe UI, Arial; }
@@ -3070,15 +2873,11 @@ def predict_batch(request: PredictionRequest):
             QProgressBar::chunk { background: #16a34a; border-radius: 4px; }
             QListWidget { background: transparent; border: none; }
         """)
-
-
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Python Data Workbench")
     window = Workbench()
     window.show()
     sys.exit(app.exec())
-
-
 if __name__ == "__main__":
     main()

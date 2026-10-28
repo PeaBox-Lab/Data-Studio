@@ -1,0 +1,23 @@
+Python Data Workbench v0.20 validation
+======================================
+
+Source reconstruction
+- v0.19 desktop source reconstructed from 19.txt.
+- Reconstructed v0.19 source passed Python compilation.
+
+v0.20 static validation
+- python_data_workbench_v0.20.py passed Python compilation.
+- workbench_headless_v0.20.py passed Python compilation.
+- Command-line help completed successfully.
+
+v0.20 end-to-end validation
+- Project load and job listing: PASS
+- Pipeline job with persisted output dataset: PASS
+- Model batch-scoring job with persisted scored dataset: PASS
+- CSV export job: PASS
+- Monitoring drift job with persisted monitoring run: PASS
+- Job history, counters, last status and runtime version persistence: PASS
+- Append-only JSONL operational log: PASS
+- Atomic project replacement path: PASS
+
+Validated job runs: 4 of 4 successful.
