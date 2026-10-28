@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.6 Analytics Platform")
+        self.setWindowTitle("Python Data Workbench v0.7 Hybrid Analytics Platform")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -164,6 +164,9 @@ class Workbench(QMainWindow):
         self.saved_pipelines = {}
         self.kpi_definitions = []
         self.dashboard_filters = {}
+        self.compute_engine = "Auto"
+        self.spark_session = None
+        self.engine_threshold_rows = 1000000
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -211,6 +214,10 @@ class Workbench(QMainWindow):
         hl.addWidget(logo)
         hl.addLayout(title_box)
         hl.addStretch()
+        hl.addWidget(QLabel("Engine"))
+        self.engine_selector = QComboBox(); self.engine_selector.addItems(["Auto", "pandas", "DuckDB", "PySpark"]); self.engine_selector.currentTextChanged.connect(self.change_engine)
+        hl.addWidget(self.engine_selector)
+        self.engine_badge = QLabel("Auto: pandas"); self.engine_badge.setObjectName("muted"); hl.addWidget(self.engine_badge)
         self.status_label = QLabel()
         hl.addWidget(self.status_label)
         root.addWidget(header)
@@ -261,6 +268,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Compute Engine": [("Engine status", "Inspect backend and dataset scale"), ("Convert to Spark", "Create distributed Spark DataFrame"), ("Spark SQL", "Run SQL through PySpark"), ("Cache dataset", "Cache distributed data in memory"), ("Explain plan", "Inspect Spark or DuckDB execution plan"), ("Return to pandas", "Collect a safe result for GUI editing")],
             "Business Analysis": [("Segment analysis", "Compare performance across categories"), ("Trend analysis", "Time trends, growth and moving averages"), ("Pareto analysis", "Rank contributors and cumulative share"), ("Cohort table", "Cross-tab two business dimensions"), ("Executive summary", "Generate a concise analytical narrative"), ("KPI summary", "Refresh dashboard metrics")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles"), ("Hypothesis tests", "t-test, ANOVA and chi-square"), ("Regression", "Linear and logistic models"), ("Reliability", "Failure and survival analysis"), ("Quality control", "SPC and capability"), ("Experimental design", "Power and sample size")],
@@ -466,6 +474,84 @@ class Workbench(QMainWindow):
         layout.addWidget(self.table)
         return page
 
+    def change_engine(self, name):
+        self.compute_engine = name
+        self.update_engine_badge()
+
+    def recommended_engine(self):
+        rows=len(self.model.dataframe)
+        if self.compute_engine != "Auto": return self.compute_engine
+        if rows < self.engine_threshold_rows: return "pandas"
+        return "DuckDB"
+
+    def update_engine_badge(self):
+        if not hasattr(self,"engine_badge"): return
+        actual=self.recommended_engine()
+        label=f"Auto: {actual}" if self.compute_engine=="Auto" else actual
+        self.engine_badge.setText(label)
+
+    def get_spark(self):
+        if self.spark_session is not None: return self.spark_session
+        try:
+            from pyspark.sql import SparkSession
+            self.spark_session=SparkSession.builder.master("local[*]").appName("PythonDataWorkbench").config("spark.sql.execution.arrow.pyspark.enabled","true").getOrCreate()
+            return self.spark_session
+        except Exception as exc:
+            raise RuntimeError("PySpark is optional and could not start. Install Java 17 and the optional PySpark package. Details: " + str(exc))
+
+    def show_engine_status(self):
+        df=self.model.dataframe; memory=int(df.memory_usage(deep=True).sum())
+        text=f"Configured engine: {self.compute_engine}\nRecommended engine: {self.recommended_engine()}\nRows: {len(df):,}\nColumns: {len(df.columns)}\nIn-memory size: {memory/1024/1024:,.2f} MB\nAuto threshold: {self.engine_threshold_rows:,} rows\n\nDecision policy:\n- pandas: editable GUI work and small/medium analysis\n- DuckDB: SQL, Parquet and larger local analytics\n- PySpark: optional distributed processing when a Spark cluster is available"
+        self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
+
+    def convert_to_spark(self):
+        try:
+            spark=self.get_spark(); sdf=spark.createDataFrame(self.model.dataframe); view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset); sdf.createOrReplaceTempView(view); self.spark_frames = getattr(self, "spark_frames", {}); self.spark_frames[view]=sdf
+            self.console.setPlainText(f"Created Spark DataFrame '{view}' with {sdf.count():,} rows and {len(sdf.columns)} columns.\nTemporary SQL view registered as {view}."); self.tabs.setCurrentWidget(self.python_page); self.engine_selector.setCurrentText("PySpark")
+        except Exception as exc: QMessageBox.critical(self,"Spark conversion failed",str(exc))
+
+    def run_spark_sql_dialog(self):
+        try:
+            spark=self.get_spark(); view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
+            if not hasattr(self,"spark_frames") or view not in self.spark_frames: self.convert_to_spark()
+            query,ok=QInputDialog.getMultiLineText(self,"Spark SQL","SQL query",f'SELECT * FROM {view} LIMIT 100')
+            if not ok:return
+            result=spark.sql(query); limit=min(result.count(),100000); pdf=result.limit(limit).toPandas(); self.last_sql_result=pdf; self.sql_result_model.set_dataframe(pdf); self.sql_status.setText(f"Spark SQL returned {limit:,} preview rows. Save result to create a GUI dataset."); self.tabs.setCurrentWidget(self.sql_page)
+        except Exception as exc: QMessageBox.critical(self,"Spark SQL failed",str(exc))
+
+    def cache_spark_dataset(self):
+        try:
+            view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
+            if not hasattr(self,"spark_frames") or view not in self.spark_frames:self.convert_to_spark()
+            frame=self.spark_frames[view].cache(); count=frame.count(); QMessageBox.information(self,"Spark cache",f"Cached {count:,} rows for '{view}'.")
+        except Exception as exc: QMessageBox.critical(self,"Spark cache failed",str(exc))
+
+    def explain_execution_plan(self):
+        try:
+            engine=self.recommended_engine()
+            if engine=="PySpark":
+                view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
+                if not hasattr(self,"spark_frames") or view not in self.spark_frames:self.convert_to_spark()
+                plan=self.spark_frames[view]._jdf.queryExecution().toString()
+            else:
+                import duckdb
+                con=duckdb.connect(database=":memory:"); con.register("active_data",self.model.dataframe); plan=con.execute("EXPLAIN SELECT * FROM active_data").fetchdf().to_string(index=False)
+            self.console.setPlainText(plan); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"Explain plan failed",str(exc))
+
+    def collect_spark_to_pandas(self):
+        try:
+            view=re.sub(r"[^A-Za-z0-9_]","_",self.active_dataset)
+            if not hasattr(self,"spark_frames") or view not in self.spark_frames:raise ValueError("Convert the active dataset to Spark first.")
+            count=self.spark_frames[view].count()
+            if count>250000:
+                answer=QMessageBox.question(self,"Large collect",f"Collecting {count:,} rows may use substantial memory. Collect the first 250,000 rows instead?")
+                if answer!=QMessageBox.Yes:return
+                result=self.spark_frames[view].limit(250000).toPandas()
+            else:result=self.spark_frames[view].toPandas()
+            self.apply_dataframe(result,"Collect Spark result to pandas"); self.engine_selector.setCurrentText("pandas")
+        except Exception as exc: QMessageBox.critical(self,"Spark collect failed",str(exc))
+
     def build_sql_page(self):
         page=QWidget(); layout=QVBoxLayout(page)
         head=QHBoxLayout(); title=QLabel("DuckDB SQL Workspace"); title.setObjectName("pageTitle")
@@ -666,6 +752,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "Engine status": self.show_engine_status,
+            "Convert to Spark": self.convert_to_spark,
+            "Spark SQL": self.run_spark_sql_dialog,
+            "Cache dataset": self.cache_spark_dataset,
+            "Explain plan": self.explain_execution_plan,
+            "Return to pandas": self.collect_spark_to_pandas,
             "KPI summary": self.kpi_summary,
             "Define KPI": self.define_kpi,
             "Save pipeline": self.save_pipeline_definition,
@@ -1089,7 +1181,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -1110,6 +1202,9 @@ class Workbench(QMainWindow):
             self.saved_pipelines = payload.get("saved_pipelines", {})
             self.kpi_definitions = payload.get("kpi_definitions", [])
             self.dashboard_filters = payload.get("dashboard_filters", {})
+            self.compute_engine = payload.get("compute_engine", "Auto")
+            self.engine_threshold_rows = payload.get("engine_threshold_rows", 1000000)
+            self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
             self.workflow.clear()
@@ -1203,6 +1298,7 @@ class Workbench(QMainWindow):
         self.quality_note.setText(f"{missing} missing cells · {df.duplicated().sum()} duplicate rows")
         self.refresh_chart_columns()
         if hasattr(self, "dashboard_summary"): self.refresh_dashboard()
+        self.update_engine_badge()
         self.status_label.setText(f"{len(df):,} rows  |  {len(df.columns)} columns  |  Quality {score}%")
 
     def apply_styles(self):
