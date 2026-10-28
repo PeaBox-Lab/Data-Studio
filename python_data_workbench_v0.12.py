@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.11 Dashboard Designer 2.0")
+        self.setWindowTitle("Python Data Workbench v0.12 Advanced Business Analytics")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -180,6 +180,7 @@ class Workbench(QMainWindow):
         self.active_dashboard = None
         self.dashboard_tile_counter = 0
         self.dashboard_cross_filter = None
+        self.analytics_pack_results = {}
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -281,6 +282,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Business Analytics Packs": [("HR / Workforce Pack", "Headcount, tenure, compensation and movement analytics"), ("Finance Pack", "Budget, actual, variance, margin and growth analytics"), ("Sales Pack", "Revenue, customer, product and RFM analytics"), ("Operations Pack", "Throughput, quality, SLA and utilization analytics"), ("Pack field mapper", "Map source columns to reusable business roles"), ("Pack dashboard", "Build a dashboard from the latest pack output")],
             "Dashboard Studio": [("New dashboard", "Create a persistent multi-visual dashboard"), ("Add KPI tile", "Add semantic measure or numeric KPI"), ("Add chart tile", "Add configurable chart visual"), ("Add table tile", "Add detail table with selected columns"), ("Dashboard layout", "Reorder, resize and configure tiles"), ("Dashboard package", "Import or export dashboard JSON")],
             "Large Data": [("Attach large file", "Query CSV or Parquet lazily with DuckDB"), ("Lazy source manager", "Inspect attached larger-than-memory sources"), ("Materialize preview", "Create a bounded editable DataFrame"), ("Large-data SQL", "Run SQL without loading the source into pandas"), ("Engine-routed pipeline", "Execute supported pipeline steps through DuckDB"), ("Source profile", "Profile a lazy source using SQL")],
             "Pipeline Studio": [("New pipeline", "Create a parameterized workflow"), ("Add cleaning step", "Reusable cleanup operation"), ("Add filter step", "Parameterized row filtering"), ("Add calculated step", "Reusable calculated column"), ("Pipeline editor", "Reorder, preview and execute"), ("Import / export pipeline", "Portable JSON definitions")],
@@ -380,6 +382,108 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def map_pack_fields(self, pack, roles):
+        df = self.model.dataframe
+        mapping = {}
+        for role, numeric in roles:
+            candidates = list(df.select_dtypes(include=np.number).columns) if numeric else list(df.columns)
+            options = ["Skip"] + [str(c) for c in candidates]
+            value, ok = QInputDialog.getItem(self, f"{pack} field mapping", role, options, 0, False)
+            if not ok: return None
+            mapping[role] = None if value == "Skip" else value
+        return mapping
+
+    def save_pack_result(self, pack, result, narrative, metrics=None):
+        name = self.unique_dataset_name(pack.lower().replace(" ", "_") + "_analysis")
+        self.datasets[name] = result.copy(); self.active_dataset = name; self.model.set_dataframe(result)
+        self.analytics_pack_results[pack] = {"dataset": name, "narrative": narrative, "metrics": metrics or []}
+        self.refresh_dataset_list(select=name); self.refresh_status(); self.console.setPlainText(narrative + "\n\n" + result.head(50).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+
+    def run_hr_pack(self):
+        roles = [("Employee ID", False), ("Department", False), ("Join date", False), ("Exit date", False), ("Salary", True), ("Status", False)]
+        m = self.map_pack_fields("HR / Workforce", roles)
+        if not m: return
+        src = self.model.dataframe.copy(); rows=[]; now=pd.Timestamp.today().normalize()
+        if m["Join date"]: src["_join_date"] = pd.to_datetime(src[m["Join date"]], errors="coerce"); src["tenure_years"] = ((now-src["_join_date"]).dt.days/365.25).round(2)
+        if m["Exit date"]: src["_exit_date"] = pd.to_datetime(src[m["Exit date"]], errors="coerce")
+        dim = m["Department"] or m["Status"]
+        if dim:
+            grouped = src.groupby(dim, dropna=False)
+            result = grouped.size().rename("records").reset_index()
+            if m["Employee ID"]: result["headcount"] = grouped[m["Employee ID"]].nunique().values
+            if m["Salary"]: result["avg_salary"] = grouped[m["Salary"]].mean().round(2).values; result["total_salary"] = grouped[m["Salary"]].sum().round(2).values
+            if "tenure_years" in src: result["avg_tenure_years"] = grouped["tenure_years"].mean().round(2).values
+        else: result = pd.DataFrame({"records":[len(src)]})
+        headcount = src[m["Employee ID"]].nunique() if m["Employee ID"] else len(src)
+        exits = int(src["_exit_date"].notna().sum()) if "_exit_date" in src else 0
+        attrition = exits / max(1, headcount + exits)
+        narrative = f"HR / Workforce analysis\nCurrent records/headcount basis: {headcount:,}\nRecorded exits: {exits:,}\nIndicative attrition ratio: {attrition:.1%}"
+        if m["Salary"]: narrative += f"\nAverage salary: {src[m['Salary']].mean():,.2f}\nTotal salary/payroll: {src[m['Salary']].sum():,.2f}"
+        self.save_pack_result("HR Workforce", result, narrative, [{"name":"Headcount","value":headcount},{"name":"Attrition","value":attrition}])
+
+    def run_finance_pack(self):
+        roles=[("Period",False),("Category",False),("Budget",True),("Actual",True),("Revenue",True),("Cost",True)]
+        m=self.map_pack_fields("Finance",roles)
+        if not m:return
+        src=self.model.dataframe.copy(); result=src.copy()
+        if m["Budget"] and m["Actual"]: result["variance"]=result[m["Actual"]]-result[m["Budget"]]; result["variance_pct"]=(result["variance"]/result[m["Budget"]].replace(0,np.nan)*100).round(2)
+        if m["Revenue"] and m["Cost"]: result["profit"]=result[m["Revenue"]]-result[m["Cost"]]; result["margin_pct"]=(result["profit"]/result[m["Revenue"]].replace(0,np.nan)*100).round(2)
+        dimension=m["Category"] or m["Period"]
+        numeric=[c for c in [m["Budget"],m["Actual"],m["Revenue"],m["Cost"],"variance","profit"] if c and c in result.columns]
+        summary=result.groupby(dimension,dropna=False)[numeric].sum().reset_index() if dimension and numeric else result[numeric].describe().transpose().reset_index()
+        actual=result[m["Actual"]].sum() if m["Actual"] else np.nan; budget=result[m["Budget"]].sum() if m["Budget"] else np.nan; revenue=result[m["Revenue"]].sum() if m["Revenue"] else np.nan; cost=result[m["Cost"]].sum() if m["Cost"] else np.nan
+        narrative="Finance analysis"
+        if m["Budget"] and m["Actual"]: narrative+=f"\nBudget: {budget:,.2f}\nActual: {actual:,.2f}\nVariance: {actual-budget:,.2f}"
+        if m["Revenue"] and m["Cost"]: narrative+=f"\nRevenue: {revenue:,.2f}\nCost: {cost:,.2f}\nProfit: {revenue-cost:,.2f}\nMargin: {(revenue-cost)/max(abs(revenue),1):.1%}"
+        self.save_pack_result("Finance",summary,narrative)
+
+    def run_sales_pack(self):
+        roles=[("Date",False),("Customer",False),("Product",False),("Region",False),("Revenue",True),("Quantity",True)]
+        m=self.map_pack_fields("Sales",roles)
+        if not m:return
+        src=self.model.dataframe.copy(); dim=m["Product"] or m["Region"] or m["Customer"]
+        measures=[c for c in [m["Revenue"],m["Quantity"]] if c]
+        result=src.groupby(dim,dropna=False)[measures].agg(["count","sum","mean"]).reset_index() if dim and measures else src.head(1000)
+        result.columns=["_".join(str(x) for x in c if x).strip("_") if isinstance(c,tuple) else str(c) for c in result.columns]
+        narrative="Sales analysis"
+        if m["Revenue"]: narrative+=f"\nTotal revenue: {src[m['Revenue']].sum():,.2f}\nAverage transaction revenue: {src[m['Revenue']].mean():,.2f}"
+        if m["Customer"]: narrative+=f"\nDistinct customers: {src[m['Customer']].nunique():,}"
+        if m["Product"]: narrative+=f"\nDistinct products: {src[m['Product']].nunique():,}"
+        self.save_pack_result("Sales",result,narrative)
+
+    def run_operations_pack(self):
+        roles=[("Date/time",False),("Process / machine",False),("Output",True),("Defects",True),("Cycle time",True),("Capacity",True),("SLA met",False)]
+        m=self.map_pack_fields("Operations",roles)
+        if not m:return
+        src=self.model.dataframe.copy(); dim=m["Process / machine"]
+        if m["Output"] and m["Capacity"]: src["utilization_pct"]=(src[m["Output"]]/src[m["Capacity"]].replace(0,np.nan)*100).round(2)
+        if m["Defects"] and m["Output"]: src["defect_rate_pct"]=(src[m["Defects"]]/src[m["Output"]].replace(0,np.nan)*100).round(2)
+        nums=[c for c in [m["Output"],m["Defects"],m["Cycle time"],m["Capacity"],"utilization_pct","defect_rate_pct"] if c and c in src.columns]
+        result=src.groupby(dim,dropna=False)[nums].agg(["count","sum","mean"]).reset_index() if dim and nums else src[nums].describe().transpose().reset_index()
+        result.columns=["_".join(str(x) for x in c if x).strip("_") if isinstance(c,tuple) else str(c) for c in result.columns]
+        narrative="Operations analysis"
+        if m["Output"]: narrative+=f"\nTotal output: {src[m['Output']].sum():,.2f}"
+        if "utilization_pct" in src: narrative+=f"\nAverage utilization: {src['utilization_pct'].mean():.1f}%"
+        if "defect_rate_pct" in src: narrative+=f"\nAverage defect rate: {src['defect_rate_pct'].mean():.2f}%"
+        if m["Cycle time"]: narrative+=f"\nAverage cycle time: {src[m['Cycle time']].mean():,.2f}"
+        self.save_pack_result("Operations",result,narrative)
+
+    def open_pack_field_mapper(self):
+        QMessageBox.information(self,"Pack field mapper","Choose any analytics pack. The mapping dialog lets you assign your dataset columns to standard business roles. Select Skip for unavailable fields.")
+
+    def create_pack_dashboard(self):
+        if not self.analytics_pack_results: QMessageBox.information(self,"Pack dashboard","Run an analytics pack first."); return
+        pack,ok=QInputDialog.getItem(self,"Pack dashboard","Pack",list(self.analytics_pack_results),0,False)
+        if not ok:return
+        info=self.analytics_pack_results[pack]; dataset=info["dataset"]
+        if dataset not in self.datasets:return
+        name=f"{pack} Dashboard"; df=self.datasets[dataset]; nums=list(df.select_dtypes(include=np.number).columns); cats=list(df.select_dtypes(exclude=np.number).columns)
+        dash={"name":name,"dataset":dataset,"tiles":[],"slicers":[],"schema_version":2}
+        for col in nums[:3]: dash["tiles"].append({"id":self.next_dashboard_tile_id(),"type":"kpi","title":f"Total {col}","measure":f"SUM::{col}","width":1,"height":1,"enabled":True})
+        if cats and nums: dash["tiles"].append({"id":self.next_dashboard_tile_id(),"type":"chart","chart":"bar","title":f"{nums[0]} by {cats[0]}","x":cats[0],"y":nums[0],"width":2,"height":2,"enabled":True}); dash["slicers"].append({"column":cats[0],"value":None})
+        dash["tiles"].append({"id":self.next_dashboard_tile_id(),"type":"table","title":"Analysis details","columns":list(df.columns)[:6],"width":3,"height":2,"enabled":True})
+        self.dashboard_definitions[name]=dash; self.active_dashboard=name; self.render_dashboard_v2(); self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
 
     def next_dashboard_tile_id(self):
         self.dashboard_tile_counter += 1
@@ -1302,6 +1406,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "HR / Workforce Pack": self.run_hr_pack,
+            "Finance Pack": self.run_finance_pack,
+            "Sales Pack": self.run_sales_pack,
+            "Operations Pack": self.run_operations_pack,
+            "Pack field mapper": self.open_pack_field_mapper,
+            "Pack dashboard": self.create_pack_dashboard,
             "New dashboard": self.new_dashboard_v2,
             "Add KPI tile": self.add_dashboard_kpi_tile,
             "Add chart tile": self.add_dashboard_chart_tile,
@@ -1755,7 +1865,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -1790,6 +1900,7 @@ class Workbench(QMainWindow):
             self.dashboard_definitions = payload.get("dashboard_definitions", {})
             self.active_dashboard = payload.get("active_dashboard")
             self.dashboard_tile_counter = payload.get("dashboard_tile_counter", 0)
+            self.analytics_pack_results = payload.get("analytics_pack_results", {})
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
