@@ -1,13 +1,16 @@
 # Cumulative Changelog
 
+## v0.18
+Deployment and REST APIs with model-version contracts, FastAPI package generation, health/metadata/prediction endpoints, schema validation, batch scoring and request history.
+
 ## v0.17
-Model monitoring and drift with reference baselines, PSI, missingness monitoring, performance tracking, alert thresholds, drift dashboard and monitoring reports.
+Model monitoring and drift.
 
 ## v0.16
-ML lifecycle and explainability with confusion matrices, ROC/PR, calibration, learning curves, residual diagnostics and model registry.
+ML lifecycle and explainability.
 
 ## v0.15
-AutoML Studio with cross-validation, tuning, holdout evaluation and feature importance.
+AutoML Studio.
 
 ## v0.14
 Engineering and Scientific Analytics Studio.
@@ -28,7 +31,7 @@ Large-data DuckDB sources and routed pipelines.
 Parameterized Pipeline Studio.
 
 ## v0.8
-Semantic model, relationships and measures.
+Semantic model and measures.
 
 ## v0.7
 Hybrid pandas, DuckDB and optional PySpark compute.

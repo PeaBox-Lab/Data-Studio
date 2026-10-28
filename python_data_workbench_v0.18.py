@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.17 Model Monitoring and Drift")
+        self.setWindowTitle("Python Data Workbench v0.18 Deployment APIs and REST")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -192,6 +192,8 @@ class Workbench(QMainWindow):
         self.monitoring_runs = []
         self.monitoring_alerts = []
         self.drift_thresholds = {"warning": 0.10, "critical": 0.25}
+        self.api_deployments = {}
+        self.api_request_history = []
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -293,6 +295,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Deployment and REST": [("Create API deployment", "Package a registered model as a FastAPI service"), ("Export API package", "Generate server, schema and launch files"), ("Test prediction API", "Validate request and response locally"), ("API batch scoring", "Score the active dataset through the API contract"), ("API history", "Review requests, responses and failures"), ("Deployment report", "Inspect endpoints, schemas and model versions")],
             "Model Monitoring": [("Create baseline", "Capture reference distributions and model metrics"), ("Run drift check", "Compare active data with a saved baseline"), ("Performance monitor", "Compare predictions with newly observed outcomes"), ("Drift dashboard", "Visualize PSI, missingness and category changes"), ("Monitoring alerts", "Review warning and critical threshold breaches"), ("Monitoring report", "Consolidate model and data health")],
             "ML Lifecycle": [("Confusion matrix", "Actual versus predicted classification results"), ("ROC and PR curves", "Probability discrimination diagnostics"), ("Calibration curve", "Predicted probability reliability"), ("Learning curve", "Training-size and cross-validation diagnostics"), ("Residual diagnostics", "Regression error and residual plots"), ("Model registry", "Versioned models and prediction history")],
             "AutoML Studio": [("New AutoML experiment", "Detect problem type and configure an experiment"), ("Run model leaderboard", "Cross-validate candidate models"), ("Evaluate holdout", "Classification or regression holdout metrics"), ("Tune best model", "Randomized hyperparameter search"), ("Explain model", "Permutation importance"), ("Export model bundle", "Persist model and schema")],
@@ -399,6 +402,204 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def api_select_registered_model(self):
+        if not self.model_registry:
+            self.ml_model_registry()
+        candidates = [(key, value) for key, value in self.model_registry.items() if key in self.trained_models]
+        if not candidates:
+            QMessageBox.information(self, "API deployment", "Register a fitted model first.")
+            return None, None
+        labels = [f"{key} {'[ACTIVE]' if value.get('active') else ''}" for key, value in candidates]
+        choice, ok = QInputDialog.getItem(self, "API deployment", "Model version", labels, 0, False)
+        return candidates[labels.index(choice)] if ok else (None, None)
+
+    def api_create_deployment(self):
+        key, metadata = self.api_select_registered_model()
+        if not metadata:
+            return
+        default_name = re.sub(r"[^A-Za-z0-9_]", "_", f"{metadata.get('target', 'model')}_api")
+        name, ok = QInputDialog.getText(self, "Create API deployment", "Deployment name", text=default_name)
+        if not ok or not name.strip():
+            return
+        name = re.sub(r"[^A-Za-z0-9_-]", "_", name.strip())
+        version, ok = QInputDialog.getText(self, "API version", "API version", text="1.0.0")
+        if not ok:
+            return
+        self.api_deployments[name] = {
+            "name": name, "model_key": key, "api_version": version,
+            "model_version": metadata.get("version"), "target": metadata.get("target"),
+            "problem": metadata.get("problem"), "features": list(metadata.get("features", [])),
+            "endpoint": f"/v1/models/{name}/predict",
+            "batch_endpoint": f"/v1/models/{name}/predict-batch",
+            "health_endpoint": "/health", "active": True,
+        }
+        QMessageBox.information(self, "API deployment", f"Created deployment '{name}'.")
+
+    def api_generate_server_code(self, deployment):
+        name = deployment["name"]
+        version = deployment["api_version"]
+        model_version = deployment.get("model_version")
+        template = """from pathlib import Path
+import pickle
+from typing import Any
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, ConfigDict
+import pandas as pd
+
+BASE_DIR = Path(__file__).resolve().parent
+with open(BASE_DIR / "model.pkl", "rb") as handle:
+    artifact = pickle.load(handle)
+model = artifact["model"]
+features = artifact["features"]
+target = artifact["target"]
+classification = artifact.get("classification", False)
+
+app = FastAPI(title=__NAME__, version=__VERSION__)
+
+class PredictionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    records: list[dict[str, Any]]
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model": __NAME__, "model_version": __MODEL_VERSION__}
+
+@app.get("/metadata")
+def metadata():
+    return {"model": __NAME__, "target": target, "features": features, "classification": classification}
+
+@app.post("/v1/models/__PATH_NAME__/predict")
+def predict(request: PredictionRequest):
+    try:
+        frame = pd.DataFrame(request.records)
+        missing = [column for column in features if column not in frame.columns]
+        if missing:
+            raise HTTPException(status_code=422, detail={"missing_features": missing})
+        prediction = model.predict(frame[features])
+        response = {"model": __NAME__, "target": target, "count": len(frame), "predictions": prediction.tolist()}
+        if classification and hasattr(model, "predict_proba"):
+            response["probabilities"] = model.predict_proba(frame[features]).tolist()
+            response["classes"] = [str(value) for value in model.classes_]
+        return response
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/v1/models/__PATH_NAME__/predict-batch")
+def predict_batch(request: PredictionRequest):
+    return predict(request)
+"""
+        return (template.replace("__NAME__", repr(name))
+                .replace("__VERSION__", repr(version))
+                .replace("__MODEL_VERSION__", repr(model_version))
+                .replace("__PATH_NAME__", name))
+
+    def api_export_package(self):
+        if not self.api_deployments:
+            QMessageBox.information(self, "Export API", "Create a deployment first.")
+            return
+        name, ok = QInputDialog.getItem(self, "Export API", "Deployment", list(self.api_deployments), 0, False)
+        if not ok:
+            return
+        deployment = self.api_deployments[name]
+        artifact = self.trained_models.get(deployment["model_key"])
+        if not artifact:
+            QMessageBox.critical(self, "Export API", "The fitted model artifact is unavailable.")
+            return
+        folder = QFileDialog.getExistingDirectory(self, "Export API package")
+        if not folder:
+            return
+        out = Path(folder) / name
+        out.mkdir(parents=True, exist_ok=True)
+        with open(out / "model.pkl", "wb") as handle:
+            pickle.dump(artifact, handle, pickle.HIGHEST_PROTOCOL)
+        (out / "server.py").write_text(self.api_generate_server_code(deployment), encoding="utf-8")
+        (out / "deployment.json").write_text(json.dumps(deployment, indent=2), encoding="utf-8")
+        (out / "requirements.txt").write_text("fastapi>=0.115\nuvicorn[standard]>=0.32\npandas>=2.2\nscikit-learn>=1.5\n", encoding="utf-8")
+        (out / "sample_request.json").write_text(json.dumps({"records": [{feature: "value" for feature in deployment["features"]}]}, indent=2), encoding="utf-8")
+        (out / "run_api.bat").write_text('@echo off\nsetlocal\ncd /d "%~dp0"\nif not exist ".venv\\Scripts\\python.exe" py -m venv .venv\n.venv\\Scripts\\python.exe -m pip install -r requirements.txt\n.venv\\Scripts\\python.exe -m uvicorn server:app --host 127.0.0.1 --port 8000\nendlocal\n', encoding="utf-8")
+        (out / "run_api.sh").write_text('#!/usr/bin/env sh\nset -eu\ncd "$(dirname "$0")"\n[ -x .venv/bin/python ] || python3 -m venv .venv\n.venv/bin/python -m pip install -r requirements.txt\nexec .venv/bin/python -m uvicorn server:app --host 127.0.0.1 --port 8000\n', encoding="utf-8")
+        (out / "README.md").write_text(f"# {name} REST API\n\nOpenAPI docs: http://127.0.0.1:8000/docs\n\nHealth: GET /health\n\nPrediction: POST {deployment['endpoint']}\n", encoding="utf-8")
+        QMessageBox.information(self, "API exported", f"Package created at:\n{out}")
+
+    def api_test_prediction(self):
+        try:
+            if not self.api_deployments:
+                QMessageBox.information(self, "Test API", "Create a deployment first.")
+                return
+            name, ok = QInputDialog.getItem(self, "Test prediction", "Deployment", list(self.api_deployments), 0, False)
+            if not ok:
+                return
+            deployment = self.api_deployments[name]
+            artifact = self.trained_models.get(deployment["model_key"])
+            if not artifact:
+                raise ValueError("Model artifact unavailable.")
+            dataframe = self.model.dataframe
+            features = artifact["features"]
+            missing = [column for column in features if column not in dataframe.columns]
+            if missing:
+                raise ValueError("Active dataset is missing: " + ", ".join(missing))
+            maximum = max(1, min(1000, len(dataframe)))
+            rows, ok = QInputDialog.getInt(self, "Test prediction", "Rows", min(5, maximum), 1, maximum)
+            if not ok:
+                return
+            frame = dataframe[features].head(rows)
+            prediction = artifact["model"].predict(frame)
+            response = {"deployment": name, "count": len(frame), "predictions": prediction.tolist()}
+            if artifact.get("classification") and hasattr(artifact["model"], "predict_proba"):
+                response["probabilities"] = artifact["model"].predict_proba(frame).tolist()
+            self.api_request_history.append({"deployment": name, "kind": "test", "rows": len(frame), "status": "success"})
+            self.console.setPlainText(json.dumps(response, indent=2, default=str))
+            self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc:
+            self.api_request_history.append({"deployment": locals().get("name"), "kind": "test", "status": "failed", "error": str(exc)})
+            QMessageBox.critical(self, "API test failed", str(exc))
+
+    def api_batch_score(self):
+        try:
+            if not self.api_deployments:
+                QMessageBox.information(self, "Batch score", "Create a deployment first.")
+                return
+            name, ok = QInputDialog.getItem(self, "Batch scoring", "Deployment", list(self.api_deployments), 0, False)
+            if not ok:
+                return
+            deployment = self.api_deployments[name]
+            artifact = self.trained_models.get(deployment["model_key"])
+            if not artifact:
+                raise ValueError("Model artifact unavailable.")
+            dataframe = self.model.dataframe.copy()
+            features = artifact["features"]
+            missing = [column for column in features if column not in dataframe.columns]
+            if missing:
+                raise ValueError("Active dataset is missing: " + ", ".join(missing))
+            prediction = artifact["model"].predict(dataframe[features])
+            column = f"api_prediction_{artifact['target']}"
+            dataframe[column] = prediction
+            if artifact.get("classification") and hasattr(artifact["model"], "predict_proba"):
+                dataframe[f"{column}_confidence"] = artifact["model"].predict_proba(dataframe[features]).max(axis=1)
+            self.api_request_history.append({"deployment": name, "kind": "batch", "dataset": self.active_dataset, "rows": len(dataframe), "status": "success", "output_column": column})
+            self.apply_dataframe(dataframe, f"REST contract batch score using {name}")
+        except Exception as exc:
+            self.api_request_history.append({"deployment": locals().get("name"), "kind": "batch", "status": "failed", "error": str(exc)})
+            QMessageBox.critical(self, "Batch score failed", str(exc))
+
+    def api_history_view(self):
+        if not self.api_request_history:
+            QMessageBox.information(self, "API history", "No API requests have been recorded.")
+            return
+        self.console.setPlainText("API REQUEST HISTORY\n" + "=" * 80 + "\n" + pd.DataFrame(self.api_request_history).tail(200).to_string(index=False))
+        self.tabs.setCurrentWidget(self.python_page)
+
+    def api_deployment_report(self):
+        lines = ["DEPLOYMENT AND REST API REPORT", "=" * 80, f"Deployments: {len(self.api_deployments)}", f"Recorded requests: {len(self.api_request_history)}", ""]
+        for name, item in self.api_deployments.items():
+            lines.extend([name.upper(), f"Model key: {item['model_key']}", f"Model version: {item.get('model_version')}", f"Problem: {item.get('problem')}", f"Target: {item.get('target')}", f"Features: {', '.join(item.get('features', []))}", f"Predict endpoint: {item['endpoint']}", f"Batch endpoint: {item['batch_endpoint']}", ""])
+        if self.api_request_history:
+            lines.extend(["LATEST REQUESTS", pd.DataFrame(self.api_request_history[-50:]).to_string(index=False)])
+        self.console.setPlainText("\n".join(lines))
+        self.tabs.setCurrentWidget(self.python_page)
 
     def monitor_select_model(self):
         if not self.model_registry:
@@ -2056,6 +2257,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "Create API deployment": self.api_create_deployment,
+            "Export API package": self.api_export_package,
+            "Test prediction API": self.api_test_prediction,
+            "API batch scoring": self.api_batch_score,
+            "API history": self.api_history_view,
+            "Deployment report": self.api_deployment_report,
             "Create baseline": self.monitor_create_baseline,
             "Run drift check": self.monitor_run_drift,
             "Performance monitor": self.monitor_performance,
@@ -2548,7 +2755,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -2595,6 +2802,8 @@ class Workbench(QMainWindow):
             self.monitoring_runs = payload.get("monitoring_runs", [])
             self.monitoring_alerts = payload.get("monitoring_alerts", [])
             self.drift_thresholds = payload.get("drift_thresholds", {"warning": 0.10, "critical": 0.25})
+            self.api_deployments = payload.get("api_deployments", {})
+            self.api_request_history = payload.get("api_request_history", [])
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
