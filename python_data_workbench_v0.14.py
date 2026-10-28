@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.13 Statistics Studio")
+        self.setWindowTitle("Python Data Workbench v0.14 Engineering and Scientific Analytics Studio")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -182,6 +182,7 @@ class Workbench(QMainWindow):
         self.dashboard_cross_filter = None
         self.analytics_pack_results = {}
         self.statistics_results = {}
+        self.engineering_results = {}
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -283,6 +284,8 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Engineering Studio": [("FFT / spectrum", "Frequency-domain and power-spectrum analysis"), ("Digital filter", "Butterworth low/high/band-pass filtering"), ("Peak analysis", "Detect peaks, prominence and spacing"), ("Numerical solver", "Integrate functions or solve roots"), ("Curve fitting", "Fit linear, polynomial or exponential models"), ("Reliability / SPC", "Weibull reliability, control limits and Cp/Cpk")],
+            "Simulation Studio": [("Monte Carlo Pro", "Distribution-driven risk simulation"), ("Parameter sweep", "Evaluate a response over an input range"), ("Engineering report", "Consolidate engineering analyses"), ("FFT / spectrum", "Analyse signals"), ("Digital filter", "Filter noisy signals"), ("Reliability / SPC", "Quality and reliability")],
             "Statistics Studio": [("Guided test", "Choose a statistical test from your data and question"), ("Assumption checks", "Normality, variance and sample diagnostics"), ("Effect size", "Quantify practical significance"), ("Confidence interval", "Estimate mean or difference with uncertainty"), ("Regression diagnostics", "Residuals, influence and model fit checks"), ("Statistics report", "Create a plain-language statistical report")],
             "Business Analytics Packs": [("HR / Workforce Pack", "Headcount, tenure, compensation and movement analytics"), ("Finance Pack", "Budget, actual, variance, margin and growth analytics"), ("Sales Pack", "Revenue, customer, product and RFM analytics"), ("Operations Pack", "Throughput, quality, SLA and utilization analytics"), ("Pack field mapper", "Map source columns to reusable business roles"), ("Pack dashboard", "Build a dashboard from the latest pack output")],
             "Dashboard Studio": [("New dashboard", "Create a persistent multi-visual dashboard"), ("Add KPI tile", "Add semantic measure or numeric KPI"), ("Add chart tile", "Add configurable chart visual"), ("Add table tile", "Add detail table with selected columns"), ("Dashboard layout", "Reorder, resize and configure tiles"), ("Dashboard package", "Import or export dashboard JSON")],
@@ -384,6 +387,185 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def store_engineering_result(self, name, text, table=None):
+        self.engineering_results[name] = {"text": text, "table": table.to_dict(orient="records") if isinstance(table, pd.DataFrame) else None}
+        self.console.setPlainText(text + ("\n\n" + table.head(100).to_string(index=False) if isinstance(table, pd.DataFrame) else ""))
+        self.tabs.setCurrentWidget(self.python_page)
+
+    def engineering_fft(self):
+        try:
+            from scipy import signal
+            col = self.choose_column("FFT / spectrum", True)
+            if not col: return
+            rate, ok = QInputDialog.getDouble(self, "Sampling rate", "Samples per second", 1.0, 0.000001, 1000000000.0, 6)
+            if not ok: return
+            values = self.model.dataframe[col].interpolate().bfill().ffill().to_numpy(dtype=float)
+            if len(values) < 4: raise ValueError("At least four samples are required.")
+            detrended = signal.detrend(values)
+            freq = np.fft.rfftfreq(len(detrended), d=1.0/rate)
+            amplitude = np.abs(np.fft.rfft(detrended)) * 2.0 / len(detrended)
+            power_freq, power = signal.periodogram(detrended, fs=rate)
+            result = pd.DataFrame({"frequency_hz": freq, "amplitude": amplitude})
+            dominant = result.loc[result["amplitude"].iloc[1:].idxmax()] if len(result) > 1 else result.iloc[0]
+            text = f"FFT and spectral analysis for {col}\nSamples: {len(values):,}\nSampling rate: {rate:,.6f} Hz\nNyquist frequency: {rate/2:,.6f} Hz\nDominant non-DC frequency: {dominant['frequency_hz']:,.6f} Hz\nAmplitude: {dominant['amplitude']:,.6f}\nPeriodogram bins: {len(power_freq):,}"
+            self.store_engineering_result("FFT spectrum", text, result)
+            self.figure.clear(); ax=self.figure.add_subplot(111); ax.plot(freq, amplitude, color="#2563eb"); ax.set_title(f"FFT amplitude spectrum: {col}"); ax.set_xlabel("Frequency (Hz)"); ax.set_ylabel("Amplitude"); ax.grid(True, alpha=.25); self.canvas.draw(); self.tabs.setCurrentWidget(self.chart_page)
+        except Exception as exc: QMessageBox.critical(self, "FFT failed", str(exc))
+
+    def engineering_filter(self):
+        try:
+            from scipy import signal
+            col = self.choose_column("Digital filter", True)
+            if not col: return
+            kind, ok = QInputDialog.getItem(self, "Digital filter", "Filter type", ["lowpass", "highpass", "bandpass"], 0, False)
+            if not ok: return
+            rate, ok = QInputDialog.getDouble(self, "Sampling rate", "Samples per second", 1.0, 0.000001, 1000000000.0, 6)
+            if not ok: return
+            low, ok = QInputDialog.getDouble(self, "Cutoff", "Low/cutoff frequency (Hz)", rate*0.1, 0.000001, rate/2*0.999, 6)
+            if not ok: return
+            high = None
+            if kind == "bandpass":
+                high, ok = QInputDialog.getDouble(self, "High cutoff", "High frequency (Hz)", rate*0.3, low*1.001, rate/2*0.999, 6)
+                if not ok: return
+            order, ok = QInputDialog.getInt(self, "Filter order", "Butterworth order", 4, 1, 12)
+            if not ok: return
+            values = self.model.dataframe[col].interpolate().bfill().ffill().to_numpy(dtype=float)
+            cutoff = [low, high] if kind == "bandpass" else low
+            sos = signal.butter(order, cutoff, btype=kind, fs=rate, output="sos")
+            filtered = signal.sosfiltfilt(sos, values)
+            df = self.model.dataframe.copy(); out_col=f"{col}_{kind}"; df[out_col]=filtered
+            self.apply_dataframe(df, f"{kind} Butterworth filter on {col}")
+            text=f"Butterworth {kind} filter\nSignal: {col}\nSampling rate: {rate:g} Hz\nOrder: {order}\nCutoff: {cutoff}\nOutput column: {out_col}"
+            self.engineering_results["Digital filter"]={"text":text,"table":None}
+        except Exception as exc: QMessageBox.critical(self, "Digital filter failed", str(exc))
+
+    def engineering_peaks(self):
+        try:
+            from scipy.signal import find_peaks
+            col=self.choose_column("Peak analysis", True)
+            if not col:return
+            values=self.model.dataframe[col].interpolate().bfill().ffill().to_numpy(dtype=float)
+            default=max(float(np.nanstd(values))*.5, 0.0)
+            prominence,ok=QInputDialog.getDouble(self,"Peak analysis","Minimum prominence",default,0,1e15,6)
+            if not ok:return
+            distance,ok=QInputDialog.getInt(self,"Peak analysis","Minimum sample distance",1,1,max(1,len(values)))
+            if not ok:return
+            peaks,props=find_peaks(values,prominence=prominence,distance=distance)
+            result=pd.DataFrame({"sample_index":peaks,"peak_value":values[peaks],"prominence":props.get("prominences",np.nan)})
+            text=f"Peak analysis for {col}\nDetected peaks: {len(peaks):,}\nMinimum prominence: {prominence:g}\nMinimum distance: {distance} samples"
+            self.store_engineering_result("Peak analysis",text,result)
+        except Exception as exc: QMessageBox.critical(self,"Peak analysis failed",str(exc))
+
+    def engineering_numerical_solver(self):
+        try:
+            from scipy import integrate, optimize
+            mode,ok=QInputDialog.getItem(self,"Numerical solver","Operation",["Integrate expression","Find root"],0,False)
+            if not ok:return
+            expr,ok=QInputDialog.getText(self,"Numerical solver","Expression in x",text="x**2 - 4")
+            if not ok:return
+            safe={"np":np,"sin":np.sin,"cos":np.cos,"exp":np.exp,"log":np.log,"sqrt":np.sqrt}
+            fn=lambda x: eval(expr,{"__builtins__":{}},{**safe,"x":x})
+            a,ok=QInputDialog.getDouble(self,"Lower bound","a",0.0,-1e12,1e12,6)
+            if not ok:return
+            b,ok=QInputDialog.getDouble(self,"Upper bound","b",5.0,-1e12,1e12,6)
+            if not ok:return
+            if mode.startswith("Integrate"):
+                value,error=integrate.quad(fn,a,b); text=f"Numerical integration\nExpression: {expr}\nInterval: [{a}, {b}]\nIntegral: {value:.12g}\nEstimated absolute error: {error:.3g}"
+            else:
+                sol=optimize.root_scalar(fn,bracket=[a,b],method="brentq"); text=f"Root solving\nExpression: {expr}\nBracket: [{a}, {b}]\nRoot: {sol.root:.12g}\nConverged: {sol.converged}\nIterations: {sol.iterations}"
+            self.store_engineering_result("Numerical solver",text)
+        except Exception as exc: QMessageBox.critical(self,"Numerical solver failed",str(exc))
+
+    def engineering_curve_fit(self):
+        try:
+            from scipy.optimize import curve_fit
+            x,y=self.choose_two_numeric("Curve fitting")
+            if not x:return
+            kind,ok=QInputDialog.getItem(self,"Curve fitting","Model",["linear","quadratic","exponential"],0,False)
+            if not ok:return
+            clean=self.model.dataframe[[x,y]].dropna(); xv=clean[x].to_numpy(float); yv=clean[y].to_numpy(float)
+            if kind=="linear":
+                fn=lambda x,a,b:a*x+b; p0=[1,0]
+            elif kind=="quadratic":
+                fn=lambda x,a,b,c:a*x*x+b*x+c; p0=[1,1,0]
+            else:
+                fn=lambda x,a,b,c:a*np.exp(b*x)+c; p0=[max(np.mean(yv),1e-6),0.01,0]
+            params,cov=curve_fit(fn,xv,yv,p0=p0,maxfev=20000); pred=fn(xv,*params); residual=yv-pred; r2=1-np.sum(residual**2)/np.sum((yv-yv.mean())**2)
+            df=self.model.dataframe.copy(); df[f"fitted_{y}"]=np.nan; df.loc[clean.index,f"fitted_{y}"]=pred; self.apply_dataframe(df,f"{kind} curve fit {y} on {x}")
+            text=f"Curve fitting\nModel: {kind}\nX: {x}\nY: {y}\nParameters: {', '.join(f'{v:.8g}' for v in params)}\nR-squared: {r2:.6f}\nRMSE: {np.sqrt(np.mean(residual**2)):.6f}"
+            self.engineering_results["Curve fitting"]={"text":text,"table":None}; self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"Curve fitting failed",str(exc))
+
+    def engineering_reliability_spc(self):
+        try:
+            from scipy import stats
+            mode,ok=QInputDialog.getItem(self,"Reliability / SPC","Analysis",["Weibull reliability","Individuals control chart","Process capability Cp/Cpk"],0,False)
+            if not ok:return
+            col=self.choose_column(mode,True)
+            if not col:return
+            values=self.model.dataframe[col].dropna().astype(float)
+            if mode=="Weibull reliability":
+                positive=values[values>0]
+                if len(positive)<3:raise ValueError("At least three positive failure/lifetime observations are required.")
+                shape,loc,scale=stats.weibull_min.fit(positive,floc=0); b10=stats.weibull_min.ppf(.10,shape,loc=0,scale=scale); median=stats.weibull_min.median(shape,loc=0,scale=scale)
+                text=f"Weibull reliability analysis\nColumn: {col}\nN={len(positive)}\nShape beta={shape:.6f}\nScale eta={scale:.6f}\nB10 life={b10:.6f}\nMedian life={median:.6f}"
+                table=pd.DataFrame({"probability":[.1,.25,.5,.75,.9],"life":stats.weibull_min.ppf([.1,.25,.5,.75,.9],shape,loc=0,scale=scale)})
+            elif mode=="Individuals control chart":
+                mean=values.mean(); mr=values.diff().abs().dropna().mean(); sigma=mr/1.128 if mr==mr else values.std(ddof=1); ucl=mean+3*sigma; lcl=mean-3*sigma
+                table=pd.DataFrame({"index":values.index,"value":values.values,"center_line":mean,"UCL":ucl,"LCL":lcl,"outside_limits":(values.values>ucl)|(values.values<lcl)})
+                text=f"Individuals control chart\nMean={mean:.6f}\nEstimated sigma={sigma:.6f}\nUCL={ucl:.6f}\nLCL={lcl:.6f}\nOut-of-control points={int(table['outside_limits'].sum())}"
+            else:
+                lsl,ok=QInputDialog.getDouble(self,"Lower specification","LSL",float(values.min()),-1e15,1e15,6)
+                if not ok:return
+                usl,ok=QInputDialog.getDouble(self,"Upper specification","USL",float(values.max()),-1e15,1e15,6)
+                if not ok:return
+                mean=values.mean(); sigma=values.std(ddof=1); cp=(usl-lsl)/(6*sigma); cpk=min((usl-mean)/(3*sigma),(mean-lsl)/(3*sigma)); text=f"Process capability\nMean={mean:.6f}\nSigma={sigma:.6f}\nLSL={lsl:.6f}\nUSL={usl:.6f}\nCp={cp:.4f}\nCpk={cpk:.4f}"; table=None
+            self.store_engineering_result(mode,text,table)
+        except Exception as exc: QMessageBox.critical(self,"Reliability / SPC failed",str(exc))
+
+    def engineering_monte_carlo(self):
+        try:
+            variables,ok=QInputDialog.getText(self,"Monte Carlo Pro","Variables as name:distribution:param1:param2; ...",text="revenue:normal:10000000:1000000; cost:normal:7000000:800000")
+            if not ok:return
+            expression,ok=QInputDialog.getText(self,"Monte Carlo Pro","Output expression",text="revenue - cost")
+            if not ok:return
+            iterations,ok=QInputDialog.getInt(self,"Monte Carlo Pro","Iterations",100000,1000,2000000,1000)
+            if not ok:return
+            rng=np.random.default_rng(42); env={}
+            for spec in variables.split(";"):
+                parts=[x.strip() for x in spec.split(":")]; name,dist=parts[0],parts[1].lower(); pars=list(map(float,parts[2:]))
+                if dist=="normal": env[name]=rng.normal(pars[0],pars[1],iterations)
+                elif dist=="uniform": env[name]=rng.uniform(pars[0],pars[1],iterations)
+                elif dist=="triangular": env[name]=rng.triangular(pars[0],pars[1],pars[2],iterations)
+                elif dist=="lognormal": env[name]=rng.lognormal(pars[0],pars[1],iterations)
+                else:raise ValueError(f"Unsupported distribution: {dist}")
+            output=eval(expression,{"__builtins__":{}},{**env,"np":np}); q=np.quantile(output,[.01,.05,.25,.5,.75,.95,.99]); loss=float(np.mean(output<0))
+            table=pd.DataFrame({"metric":["mean","std","p01","p05","p25","p50","p75","p95","p99","probability_below_zero"],"value":[np.mean(output),np.std(output),*q,loss]})
+            text=f"Monte Carlo simulation\nIterations: {iterations:,}\nExpression: {expression}\nExpected value: {np.mean(output):,.6f}\nStandard deviation: {np.std(output):,.6f}\nProbability below zero: {loss:.2%}"
+            self.store_engineering_result("Monte Carlo Pro",text,table)
+        except Exception as exc: QMessageBox.critical(self,"Monte Carlo simulation failed",str(exc))
+
+    def engineering_parameter_sweep(self):
+        try:
+            expr,ok=QInputDialog.getText(self,"Parameter sweep","Expression in x",text="-0.5*x**2 + 10*x + 20")
+            if not ok:return
+            start,ok=QInputDialog.getDouble(self,"Parameter sweep","Start",0,-1e12,1e12,6)
+            if not ok:return
+            stop,ok=QInputDialog.getDouble(self,"Parameter sweep","Stop",20,-1e12,1e12,6)
+            if not ok:return
+            points,ok=QInputDialog.getInt(self,"Parameter sweep","Points",101,2,100000)
+            if not ok:return
+            x=np.linspace(start,stop,points); y=eval(expr,{"__builtins__":{}},{"x":x,"np":np}); result=pd.DataFrame({"x":x,"response":y}); best=result.loc[result["response"].idxmax()]
+            text=f"Parameter sweep\nExpression: {expr}\nRange: {start} to {stop}\nPoints: {points:,}\nMaximum response: {best['response']:.8g} at x={best['x']:.8g}"
+            self.store_engineering_result("Parameter sweep",text,result)
+        except Exception as exc: QMessageBox.critical(self,"Parameter sweep failed",str(exc))
+
+    def engineering_report(self):
+        if not self.engineering_results: QMessageBox.information(self,"Engineering report","Run an Engineering Studio analysis first."); return
+        lines=["ENGINEERING AND SCIENTIFIC ANALYTICS REPORT","="*72,f"Dataset: {self.active_dataset}",""]
+        for name,result in self.engineering_results.items(): lines.extend([name.upper(),"-"*len(name),result.get("text",""),""])
+        self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
 
     def choose_group_and_measure(self, title):
         df=self.model.dataframe
@@ -1522,6 +1704,15 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "FFT / spectrum": self.engineering_fft,
+            "Digital filter": self.engineering_filter,
+            "Peak analysis": self.engineering_peaks,
+            "Numerical solver": self.engineering_numerical_solver,
+            "Curve fitting": self.engineering_curve_fit,
+            "Reliability / SPC": self.engineering_reliability_spc,
+            "Monte Carlo Pro": self.engineering_monte_carlo,
+            "Parameter sweep": self.engineering_parameter_sweep,
+            "Engineering report": self.engineering_report,
             "Guided test": self.guided_statistical_test,
             "Assumption checks": self.statistics_assumption_checks,
             "Effect size": self.statistics_effect_size,
@@ -1987,7 +2178,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -2024,6 +2215,7 @@ class Workbench(QMainWindow):
             self.dashboard_tile_counter = payload.get("dashboard_tile_counter", 0)
             self.analytics_pack_results = payload.get("analytics_pack_results", {})
             self.statistics_results = payload.get("statistics_results", {})
+            self.engineering_results = payload.get("engineering_results", {})
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
