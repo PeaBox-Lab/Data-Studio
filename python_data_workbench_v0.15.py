@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.14 Engineering and Scientific Analytics Studio")
+        self.setWindowTitle("Python Data Workbench v0.15 AutoML Studio")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -183,6 +183,8 @@ class Workbench(QMainWindow):
         self.analytics_pack_results = {}
         self.statistics_results = {}
         self.engineering_results = {}
+        self.automl_experiments = {}
+        self.active_experiment = None
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -284,6 +286,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "AutoML Studio": [("New AutoML experiment", "Detect problem type and configure an experiment"), ("Run model leaderboard", "Cross-validate candidate models"), ("Evaluate holdout", "Classification or regression holdout metrics"), ("Tune best model", "Randomized hyperparameter search"), ("Explain model", "Permutation importance"), ("Export model bundle", "Persist model and schema")],
             "Engineering Studio": [("FFT / spectrum", "Frequency-domain and power-spectrum analysis"), ("Digital filter", "Butterworth low/high/band-pass filtering"), ("Peak analysis", "Detect peaks, prominence and spacing"), ("Numerical solver", "Integrate functions or solve roots"), ("Curve fitting", "Fit linear, polynomial or exponential models"), ("Reliability / SPC", "Weibull reliability, control limits and Cp/Cpk")],
             "Simulation Studio": [("Monte Carlo Pro", "Distribution-driven risk simulation"), ("Parameter sweep", "Evaluate a response over an input range"), ("Engineering report", "Consolidate engineering analyses"), ("FFT / spectrum", "Analyse signals"), ("Digital filter", "Filter noisy signals"), ("Reliability / SPC", "Quality and reliability")],
             "Statistics Studio": [("Guided test", "Choose a statistical test from your data and question"), ("Assumption checks", "Normality, variance and sample diagnostics"), ("Effect size", "Quantify practical significance"), ("Confidence interval", "Estimate mean or difference with uncertainty"), ("Regression diagnostics", "Residuals, influence and model fit checks"), ("Statistics report", "Create a plain-language statistical report")],
@@ -387,6 +390,159 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def automl_detect_problem(self, target):
+        y=self.model.dataframe[target].dropna()
+        if y.dtype == object or str(y.dtype).startswith("category") or y.nunique() <= max(10, int(len(y)*.05)):
+            return "classification"
+        return "regression"
+
+    def automl_new_experiment(self):
+        df=self.model.dataframe
+        target,ok=QInputDialog.getItem(self,"New AutoML experiment","Target column",list(df.columns),0,False)
+        if not ok:return
+        detected=self.automl_detect_problem(target)
+        problem,ok=QInputDialog.getItem(self,"New AutoML experiment","Problem type",[detected,"classification" if detected=="regression" else "regression"],0,False)
+        if not ok:return
+        name,ok=QInputDialog.getText(self,"New AutoML experiment","Experiment name",text=f"{target}_{problem}_experiment")
+        if not ok or not name.strip():return
+        features=[c for c in df.columns if c!=target]
+        self.automl_experiments[name.strip()]={"name":name.strip(),"dataset":self.active_dataset,"target":target,"features":features,"problem":problem,"status":"configured","leaderboard":None,"best_model":None,"best_model_name":None,"metrics":{},"metadata":{"rows":len(df),"created_with":"v0.15"}}
+        self.active_experiment=name.strip(); QMessageBox.information(self,"AutoML experiment",f"Created '{name.strip()}'.\nDetected problem: {problem}\nFeatures: {len(features)}")
+
+    def automl_get_experiment(self):
+        if self.active_experiment in self.automl_experiments:return self.automl_experiments[self.active_experiment]
+        if not self.automl_experiments:
+            self.automl_new_experiment()
+            return self.automl_experiments.get(self.active_experiment)
+        name,ok=QInputDialog.getItem(self,"AutoML experiment","Experiment",list(self.automl_experiments),0,False)
+        if not ok:return None
+        self.active_experiment=name; return self.automl_experiments[name]
+
+    def automl_prepare(self, exp):
+        from sklearn.compose import ColumnTransformer
+        from sklearn.pipeline import Pipeline
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+        from sklearn.impute import SimpleImputer
+        df=self.datasets[exp["dataset"]].copy(); y=df[exp["target"]]; valid=y.notna(); X=df.loc[valid,exp["features"]]; y=y.loc[valid]
+        numeric=list(X.select_dtypes(include=np.number).columns); categorical=[c for c in X.columns if c not in numeric]
+        transformers=[]
+        if numeric: transformers.append(("num",Pipeline([("impute",SimpleImputer(strategy="median")),("scale",StandardScaler())]),numeric))
+        if categorical: transformers.append(("cat",Pipeline([("impute",SimpleImputer(strategy="most_frequent")),("encode",OneHotEncoder(handle_unknown="ignore"))]),categorical))
+        pre=ColumnTransformer(transformers,remainder="drop")
+        return X,y,pre,numeric,categorical
+
+    def automl_candidates(self, problem):
+        if problem=="classification":
+            from sklearn.linear_model import LogisticRegression
+            from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, HistGradientBoostingClassifier
+            from sklearn.dummy import DummyClassifier
+            return {"Baseline":DummyClassifier(strategy="most_frequent"),"Logistic Regression":LogisticRegression(max_iter=2000,class_weight="balanced"),"Random Forest":RandomForestClassifier(n_estimators=250,random_state=42,class_weight="balanced"),"Extra Trees":ExtraTreesClassifier(n_estimators=250,random_state=42,class_weight="balanced"),"Histogram Gradient Boosting":HistGradientBoostingClassifier(random_state=42)}
+        from sklearn.linear_model import LinearRegression, Ridge
+        from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, HistGradientBoostingRegressor
+        from sklearn.dummy import DummyRegressor
+        return {"Baseline":DummyRegressor(strategy="mean"),"Linear Regression":LinearRegression(),"Ridge":Ridge(),"Random Forest":RandomForestRegressor(n_estimators=250,random_state=42,n_jobs=-1),"Extra Trees":ExtraTreesRegressor(n_estimators=250,random_state=42,n_jobs=-1),"Histogram Gradient Boosting":HistGradientBoostingRegressor(random_state=42)}
+
+    def automl_run_leaderboard(self):
+        try:
+            from sklearn.pipeline import Pipeline
+            from sklearn.model_selection import cross_validate, StratifiedKFold, KFold
+            exp=self.automl_get_experiment()
+            if not exp:return
+            X,y,pre,numeric,categorical=self.automl_prepare(exp)
+            if len(X)<20:raise ValueError("AutoML leaderboard requires at least 20 rows with a non-missing target.")
+            if exp["problem"]=="classification":
+                min_class=int(y.value_counts().min()); folds=min(5,min_class)
+                if folds<2:raise ValueError("Each classification class needs at least two observations.")
+                cv=StratifiedKFold(n_splits=folds,shuffle=True,random_state=42); scoring={"accuracy":"accuracy","f1":"f1_weighted","roc_auc":"roc_auc_ovr_weighted"} if y.nunique()>2 else {"accuracy":"accuracy","f1":"f1_weighted","roc_auc":"roc_auc"}
+                primary="test_roc_auc"
+            else:
+                folds=min(5,max(2,len(X)//10)); cv=KFold(n_splits=folds,shuffle=True,random_state=42); scoring={"r2":"r2","mae":"neg_mean_absolute_error","rmse":"neg_root_mean_squared_error"}; primary="test_r2"
+            rows=[]; fitted={}
+            for name,estimator in self.automl_candidates(exp["problem"]).items():
+                pipe=Pipeline([("preprocess",pre),("model",estimator)])
+                try:
+                    scores=cross_validate(pipe,X,y,cv=cv,scoring=scoring,n_jobs=-1,error_score="raise")
+                    row={"model":name,"fit_seconds":scores["fit_time"].mean()}
+                    for key,val in scores.items():
+                        if key.startswith("test_"): row[key.replace("test_","")]=(-val.mean() if key in ("test_mae","test_rmse") else val.mean()); row[key.replace("test_","")+"_std"]=val.std()
+                    rows.append(row); pipe.fit(X,y); fitted[name]=pipe
+                except Exception as exc: rows.append({"model":name,"error":str(exc)})
+            board=pd.DataFrame(rows)
+            metric=primary.replace("test_","")
+            valid=board[board[metric].notna()] if metric in board.columns else pd.DataFrame()
+            if valid.empty:raise ValueError("No candidate model completed successfully.")
+            best_name=valid.sort_values(metric,ascending=False).iloc[0]["model"]
+            exp["leaderboard"]=board.to_dict(orient="records"); exp["best_model"]=fitted[best_name]; exp["best_model_name"]=best_name; exp["status"]="leaderboard_complete"; exp["metadata"].update({"numeric_features":numeric,"categorical_features":categorical,"cv_folds":folds,"primary_metric":metric})
+            self.trained_models[exp["name"]]={"model":exp["best_model"],"features":exp["features"],"target":exp["target"],"classification":exp["problem"]=="classification"}
+            self.console.setPlainText(f"AutoML leaderboard: {exp['name']}\nBest model: {best_name}\nPrimary metric: {metric}\n\n"+board.sort_values(metric,ascending=False,na_position="last").to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"AutoML leaderboard failed",str(exc))
+
+    def automl_tune_best(self):
+        try:
+            from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, KFold
+            exp=self.automl_get_experiment()
+            if not exp or exp.get("best_model") is None:raise ValueError("Run the model leaderboard first.")
+            X,y,pre,numeric,categorical=self.automl_prepare(exp); name=exp["best_model_name"]
+            grids={
+                "Random Forest":{"model__n_estimators":[150,250,400,600],"model__max_depth":[None,5,10,20],"model__min_samples_leaf":[1,2,4,8],"model__max_features":["sqrt","log2",None]},
+                "Extra Trees":{"model__n_estimators":[150,250,400,600],"model__max_depth":[None,5,10,20],"model__min_samples_leaf":[1,2,4,8],"model__max_features":["sqrt","log2",None]},
+                "Logistic Regression":{"model__C":np.logspace(-3,3,30),"model__penalty":["l2"]},
+                "Ridge":{"model__alpha":np.logspace(-4,4,60)},
+                "Histogram Gradient Boosting":{"model__learning_rate":[.02,.05,.1,.2],"model__max_iter":[100,200,400],"model__max_leaf_nodes":[15,31,63],"model__l2_regularization":[0,.1,1,10]}
+            }
+            if name not in grids:raise ValueError(f"Hyperparameter tuning is not configured for {name}.")
+            if exp["problem"]=="classification":
+                folds=min(5,int(y.value_counts().min())); cv=StratifiedKFold(n_splits=max(2,folds),shuffle=True,random_state=42); scoring="roc_auc_ovr_weighted" if y.nunique()>2 else "roc_auc"
+            else: cv=KFold(n_splits=min(5,max(2,len(X)//10)),shuffle=True,random_state=42); scoring="r2"
+            search=RandomizedSearchCV(exp["best_model"],grids[name],n_iter=min(25,max(1,np.prod([len(v) for v in grids[name].values()]))),scoring=scoring,cv=cv,n_jobs=-1,random_state=42,refit=True)
+            search.fit(X,y); exp["best_model"]=search.best_estimator_; exp["tuning"]={"best_score":float(search.best_score_),"best_params":search.best_params_,"scoring":scoring}; exp["status"]="tuned"; self.trained_models[exp["name"]]["model"]=exp["best_model"]
+            self.console.setPlainText(f"AutoML tuning complete\nExperiment: {exp['name']}\nModel: {name}\nScoring: {scoring}\nBest CV score: {search.best_score_:.6f}\nBest parameters:\n"+json.dumps(search.best_params_,indent=2)); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"AutoML tuning failed",str(exc))
+
+    def automl_evaluate_holdout(self):
+        try:
+            from sklearn.model_selection import train_test_split
+            from sklearn.metrics import accuracy_score,balanced_accuracy_score,f1_score,roc_auc_score,classification_report,confusion_matrix,r2_score,mean_absolute_error,mean_squared_error
+            from sklearn.base import clone
+            exp=self.automl_get_experiment()
+            if not exp or exp.get("best_model") is None:raise ValueError("Run the leaderboard first.")
+            X,y,pre,numeric,categorical=self.automl_prepare(exp); strat=y if exp["problem"]=="classification" and y.value_counts().min()>=2 else None
+            Xtr,Xte,ytr,yte=train_test_split(X,y,test_size=.2,random_state=42,stratify=strat); model=clone(exp["best_model"]); model.fit(Xtr,ytr); pred=model.predict(Xte)
+            if exp["problem"]=="classification":
+                metrics={"accuracy":accuracy_score(yte,pred),"balanced_accuracy":balanced_accuracy_score(yte,pred),"f1_weighted":f1_score(yte,pred,average="weighted")}; cm=confusion_matrix(yte,pred); report=classification_report(yte,pred,zero_division=0)
+                if hasattr(model,"predict_proba"):
+                    proba=model.predict_proba(Xte)
+                    try: metrics["roc_auc"]=roc_auc_score(yte,proba[:,1] if proba.shape[1]==2 else proba,multi_class="ovr",average="weighted")
+                    except Exception: pass
+                text="Holdout classification evaluation\n"+"\n".join(f"{k}: {v:.6f}" for k,v in metrics.items())+"\n\nConfusion matrix:\n"+np.array2string(cm)+"\n\n"+report
+                table=pd.DataFrame({"actual":yte.astype(str).values,"predicted":pd.Series(pred).astype(str).values})
+            else:
+                metrics={"r2":r2_score(yte,pred),"mae":mean_absolute_error(yte,pred),"rmse":mean_squared_error(yte,pred)**.5}; text="Holdout regression evaluation\n"+"\n".join(f"{k}: {v:.6f}" for k,v in metrics.items()); table=pd.DataFrame({"actual":yte.values,"predicted":pred,"residual":yte.values-pred})
+            exp["metrics"]=metrics; exp["holdout_table"]=table.to_dict(orient="records"); exp["holdout_model"]=model; exp["status"]="evaluated"; self.console.setPlainText(text+"\n\n"+table.head(100).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"AutoML evaluation failed",str(exc))
+
+    def automl_explain(self):
+        try:
+            from sklearn.inspection import permutation_importance
+            exp=self.automl_get_experiment()
+            if not exp or exp.get("best_model") is None:raise ValueError("Run the leaderboard first.")
+            X,y,pre,numeric,categorical=self.automl_prepare(exp); sample_n=min(len(X),5000); sample=X.sample(sample_n,random_state=42) if len(X)>sample_n else X; ys=y.loc[sample.index]
+            scoring="f1_weighted" if exp["problem"]=="classification" else "r2"; result=permutation_importance(exp["best_model"],sample,ys,n_repeats=8,random_state=42,scoring=scoring,n_jobs=-1)
+            table=pd.DataFrame({"feature":sample.columns,"importance_mean":result.importances_mean,"importance_std":result.importances_std}).sort_values("importance_mean",ascending=False).reset_index(drop=True); exp["feature_importance"]=table.to_dict(orient="records")
+            self.console.setPlainText(f"Permutation feature importance\nExperiment: {exp['name']}\nModel: {exp['best_model_name']}\nScoring: {scoring}\nSample rows: {sample_n:,}\n\n"+table.to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+        except Exception as exc: QMessageBox.critical(self,"Model explanation failed",str(exc))
+
+    def automl_export_bundle(self):
+        try:
+            exp=self.automl_get_experiment()
+            if not exp or exp.get("best_model") is None:raise ValueError("A trained AutoML experiment is required.")
+            path,_=QFileDialog.getSaveFileName(self,"Export AutoML bundle",f"{exp['name']}.automl.pkl","AutoML bundle (*.pkl)")
+            if not path:return
+            bundle={"bundle_version":1,"experiment":exp["name"],"dataset":exp["dataset"],"target":exp["target"],"features":exp["features"],"problem":exp["problem"],"model_name":exp["best_model_name"],"model":exp["best_model"],"metrics":exp.get("metrics",{}),"metadata":exp.get("metadata",{}),"tuning":exp.get("tuning")}
+            with open(path,"wb") as handle:pickle.dump(bundle,handle,protocol=pickle.HIGHEST_PROTOCOL)
+            schema_path=str(Path(path).with_suffix(".schema.json")); Path(schema_path).write_text(json.dumps({k:v for k,v in bundle.items() if k!="model"},indent=2,default=str),encoding="utf-8"); QMessageBox.information(self,"AutoML export",f"Saved model bundle:\n{path}\n\nSaved readable schema:\n{schema_path}")
+        except Exception as exc: QMessageBox.critical(self,"AutoML export failed",str(exc))
 
     def store_engineering_result(self, name, text, table=None):
         self.engineering_results[name] = {"text": text, "table": table.to_dict(orient="records") if isinstance(table, pd.DataFrame) else None}
@@ -1704,6 +1860,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "New AutoML experiment": self.automl_new_experiment,
+            "Run model leaderboard": self.automl_run_leaderboard,
+            "Evaluate holdout": self.automl_evaluate_holdout,
+            "Tune best model": self.automl_tune_best,
+            "Explain model": self.automl_explain,
+            "Export model bundle": self.automl_export_bundle,
             "FFT / spectrum": self.engineering_fft,
             "Digital filter": self.engineering_filter,
             "Peak analysis": self.engineering_peaks,
@@ -2178,7 +2340,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -2216,6 +2378,8 @@ class Workbench(QMainWindow):
             self.analytics_pack_results = payload.get("analytics_pack_results", {})
             self.statistics_results = payload.get("statistics_results", {})
             self.engineering_results = payload.get("engineering_results", {})
+            self.automl_experiments = payload.get("automl_experiments", {})
+            self.active_experiment = payload.get("active_experiment")
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
