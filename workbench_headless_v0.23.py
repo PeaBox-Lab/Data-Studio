@@ -1,5 +1,5 @@
 
-"""Automation orchestrator for Python Data Workbench v0.22.
+"""Automation orchestrator for Python Data Workbench v0.23.
 
 Loads a .pdw project, executes saved or due jobs, applies dependency and retry
 policies, records each run, and atomically persists changes without the GUI.
@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 
-RUNTIME_VERSION = "0.22"
+RUNTIME_VERSION = "0.23"
 
 
 def utc_now() -> str:

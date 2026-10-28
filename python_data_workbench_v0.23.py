@@ -132,7 +132,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
   def __init__(self):
       super().__init__()
-      self.setWindowTitle("Python Data Workbench v0.22 Guided Workspace")
+      self.setWindowTitle("Python Data Workbench v0.23 Productivity Workspace")
       self.resize(1450, 900)
       self.current_project_path = None
       self.history = []
@@ -178,6 +178,8 @@ class Workbench(QMainWindow):
       self.scheduled_jobs = {}
       self.job_runs = []
       self.job_counter = 0
+      self.recent_actions = []
+      self.ui_compact_mode = False
       self.model = DataFrameModel(self.datasets[self.active_dataset])
       self.model.changed.connect(self.refresh_status)
       self.build_ui()
@@ -278,7 +280,7 @@ class Workbench(QMainWindow):
       self.tabs.setDocumentMode(True)
       self.tabs.setUsesScrollButtons(True)
       definitions = {
-          "Home": [("Getting started", "Choose a guided path"), ("Open data", "Import CSV, Excel, JSON or Parquet"), ("Data profile", "Understand quality and distributions"), ("Dashboard summary", "Open executive analytics"), ("New pipeline", "Build repeatable transformations"), ("Quick actions", "Search common actions")],
+          "Home": [("Getting started", "Choose a guided path"), ("Open data", "Import CSV, Excel, JSON or Parquet"), ("Recent actions", "Resume what you used recently"), ("Workspace overview", "See project health and next steps"), ("Quick actions", "Search common actions"), ("Toggle focus mode", "Reduce visual clutter")],
           "Data": [("Missing values", "Clean missing values"), ("Duplicates", "Remove duplicates"), ("Data types", "Infer and convert types"), ("Join tables", "Merge datasets"), ("Pivot / reshape", "Pivot and aggregate"), ("Attach large file", "DuckDB CSV or Parquet")],
           "Transform": [("New pipeline", "Create workflow"), ("Add cleaning step", "Reusable cleaning"), ("Add filter step", "Saved row filters"), ("Add calculated step", "Derived columns"), ("Pipeline editor", "Preview and execute"), ("Import / export pipeline", "Share pipeline JSON")],
           "Analyze": [("KPI summary", "Executive KPIs"), ("Segment analysis", "Compare segments"), ("Trend analysis", "Growth and moving averages"), ("Guided test", "Guided statistics"), ("Monte Carlo Pro", "Simulation and risk"), ("Engineering report", "Scientific results")],
@@ -2272,8 +2274,8 @@ def predict_batch(request: PredictionRequest):
           row=QFrame(); row.setObjectName("toolCard"); layout=QHBoxLayout(row); text=QVBoxLayout(); a=QLabel(label); a.setObjectName("toolTitle"); b=QLabel(desc); b.setObjectName("muted"); text.addWidget(a); text.addWidget(b); button=QPushButton("Start"); button.clicked.connect(lambda checked=False,f=fn,d=dialog:(d.accept(),f())); layout.addLayout(text,1); layout.addWidget(button); root.addWidget(row)
       close=QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); dialog.exec()
   def open_command_palette(self):
-      actions=[("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
-      favorites={"Open data","Data profile","New pipeline","New dashboard","New AutoML experiment"}; dialog=QDialog(self); dialog.setWindowTitle("Quick Actions"); dialog.resize(560,500); root=QVBoxLayout(dialog); search=QLineEdit(); search.setPlaceholderText("Search actions... Ctrl+K"); root.addWidget(search); listing=QListWidget(); root.addWidget(listing,1)
+      actions=[("Workspace overview",self.show_workspace_overview),("Recent actions",self.show_recent_actions),("Toggle focus mode",self.toggle_focus_mode),("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
+      favorites={"Open data","Data profile","Workspace overview","New pipeline","New dashboard","New AutoML experiment"}; dialog=QDialog(self); dialog.setWindowTitle("Quick Actions"); dialog.resize(560,500); root=QVBoxLayout(dialog); search=QLineEdit(); search.setPlaceholderText("Search actions... Ctrl+K"); root.addWidget(search); listing=QListWidget(); root.addWidget(listing,1)
       def refresh(text=""):
           listing.clear(); q=text.strip().lower(); ordered=sorted(actions,key=lambda x:(x[0] not in favorites,x[0]))
           for label,fn in ordered:
@@ -2284,9 +2286,35 @@ def predict_batch(request: PredictionRequest):
           if not item:return
           label=item.data(Qt.UserRole); match=next(x for x in actions if x[0]==label); self.track_recent_action(label); dialog.accept(); match[1]()
       search.textChanged.connect(refresh); search.returnPressed.connect(run); listing.itemDoubleClicked.connect(lambda _:run()); refresh(); dialog.exec()
+  def show_recent_actions(self):
+      actions = getattr(self, "recent_actions", [])
+      if not actions:
+          QMessageBox.information(self, "Recent Actions", "No recent actions yet. Use Ctrl+K or choose an action from Home.")
+          return
+      choice, ok = QInputDialog.getItem(self, "Recent Actions", "Run again", actions, 0, False)
+      if ok and choice:
+          self.select_tool(choice)
+  def show_workspace_overview(self):
+      df = self.model.dataframe
+      missing = int(df.isna().sum().sum()) if not df.empty else 0
+      text = f"WORKSPACE OVERVIEW\n{'='*72}\nActive dataset: {self.active_dataset}\nRows: {len(df):,}\nColumns: {len(df.columns)}\nMissing cells: {missing:,}\nDatasets: {len(self.datasets)}\nPipelines: {len(self.pipeline_definitions)}\nDashboards: {len(self.dashboard_definitions)}\nJobs: {len(self.scheduled_jobs)}\nModel versions: {len(self.model_registry)}\n\nSuggested next step:\n"
+      if missing: text += "Review Data > Missing values."
+      elif not self.pipeline_definitions: text += "Create a Transform pipeline to make the work reproducible."
+      elif not self.dashboard_definitions: text += "Create a Visualize dashboard for the cleaned output."
+      else: text += "Your project has data, pipelines and dashboards. Use Automate to schedule repeatable work."
+      self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
+  def toggle_focus_mode(self):
+      self.ui_compact_mode = not getattr(self, "ui_compact_mode", False)
+      if self.ui_compact_mode:
+          self.showMaximized(); self.statusBar().showMessage("Focus mode enabled. Press Ctrl+K for actions.", 5000)
+      else:
+          self.showNormal(); self.statusBar().showMessage("Focus mode disabled.", 3000)
   def select_tool(self, name):
       handlers = {
           "Getting started": self.show_getting_started,
+          "Recent actions": self.show_recent_actions,
+          "Workspace overview": self.show_workspace_overview,
+          "Toggle focus mode": self.toggle_focus_mode,
           "Quick actions": self.open_command_palette,
           "Open data": self.import_data,
           "Dashboard summary": lambda: self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard")),
@@ -2915,7 +2943,7 @@ def predict_batch(request: PredictionRequest):
           #muted { color: #667085; font-size: 11px; }
           #sidebar { background: white; border-right: 1px solid #dde3ea; }
           #datasetCard { background: #eef4ff; border: 1px solid #bfd3ff; border-radius: 10px; }
-          #toolCard { background: white; border: 1px solid #dde3ea; border-radius: 12px; min-height: 90px; }
+          #toolCard { background: white; border: 1px solid #dde3ea; border-radius: 12px; min-height: 90px; padding: 2px; }
           #toolCard:hover { border: 1px solid #6b9cff; background: #f8fbff; }
           #toolTitle { font-size: 13px; font-weight: 700; }
           QTabWidget::pane { border: none; }
