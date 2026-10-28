@@ -151,13 +151,15 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.4")
+        self.setWindowTitle("Python Data Workbench v0.5 Analytics Platform")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
         self.active_dataset = "sensor_readings"
         self.pipeline_steps = []
         self.trained_models = {}
+        self.metric_definitions = []
+        self.dashboard_cards = []
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -251,12 +253,14 @@ class Workbench(QMainWindow):
         definitions = {
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
+            "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Segment analysis", "Compare performance across categories"), ("Trend analysis", "Time trends, growth and moving averages"), ("Pareto analysis", "Rank contributors and cumulative share"), ("Cohort table", "Cross-tab two business dimensions"), ("Executive summary", "Generate a concise analytical narrative")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles"), ("Hypothesis tests", "t-test, ANOVA and chi-square"), ("Regression", "Linear and logistic models"), ("Reliability", "Failure and survival analysis"), ("Quality control", "SPC and capability"), ("Experimental design", "Power and sample size")],
             "Data Science": [("Train model", "Classification or regression with automatic preprocessing"), ("Compare models", "Cross-validated model leaderboard"), ("Forecast", "Time-series prediction"), ("Cluster", "K-means segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Anomaly detection", "Isolation-based detection"), ("Save model", "Persist a trained model artifact"), ("Batch predict", "Apply saved model to another dataset")],
             "Engineering": [("Units", "Unit conversion"), ("Signal processing", "FFT, filtering and peaks"), ("Numerical methods", "Integration and equation solving"), ("Optimization", "Constrained solving"), ("Simulation", "Monte Carlo analysis"), ("Matrix operations", "Linear algebra")],
         }
         for section, cards in definitions.items():
             self.tabs.addTab(self.make_section(section, cards), section)
+        self.tabs.addTab(self.build_dashboard_page(), "Dashboard")
         self.tabs.addTab(self.build_data_page(), "Data Grid")
         self.chart_page = self.build_chart_page()
         self.tabs.addTab(self.chart_page, "Charts")
@@ -281,6 +285,79 @@ class Workbench(QMainWindow):
         layout.addLayout(grid_row)
         layout.addStretch()
         return page
+
+    def build_dashboard_page(self):
+        page = QWidget(); outer = QVBoxLayout(page)
+        top = QHBoxLayout(); title = QLabel("Analytics Dashboard"); title.setObjectName("pageTitle")
+        refresh = QPushButton("Refresh dashboard"); refresh.setObjectName("primary"); refresh.clicked.connect(self.refresh_dashboard)
+        top.addWidget(title); top.addStretch(); top.addWidget(refresh); outer.addLayout(top)
+        self.dashboard_summary = QLabel("Select or import a dataset to generate analytics."); self.dashboard_summary.setWordWrap(True); self.dashboard_summary.setObjectName("muted"); outer.addWidget(self.dashboard_summary)
+        self.kpi_strip = QHBoxLayout(); outer.addLayout(self.kpi_strip)
+        split = QSplitter()
+        self.dashboard_table = QTableView(); self.dashboard_table_model = DataFrameModel(pd.DataFrame()); self.dashboard_table.setModel(self.dashboard_table_model)
+        self.dashboard_figure = Figure(figsize=(7,4), tight_layout=True); self.dashboard_canvas = FigureCanvas(self.dashboard_figure)
+        split.addWidget(self.dashboard_table); split.addWidget(self.dashboard_canvas); split.setSizes([500,700]); outer.addWidget(split,1)
+        self.dashboard_insights = QTextEdit(); self.dashboard_insights.setReadOnly(True); self.dashboard_insights.setMaximumHeight(150); outer.addWidget(self.dashboard_insights)
+        return page
+
+    def clear_layout(self, layout):
+        while layout.count():
+            item=layout.takeAt(0); widget=item.widget()
+            if widget: widget.deleteLater()
+
+    def refresh_dashboard(self):
+        if not hasattr(self, "kpi_strip"): return
+        df=self.model.dataframe
+        self.clear_layout(self.kpi_strip)
+        numeric=list(df.select_dtypes(include=np.number).columns)
+        metrics=[("Rows", f"{len(df):,}"),("Columns",str(len(df.columns))),("Missing",f"{int(df.isna().sum().sum()):,}"),("Duplicates",f"{int(df.duplicated().sum()):,}")]
+        for col in numeric[:2]: metrics.append((f"Avg {col}", f"{df[col].mean():,.2f}"))
+        for label,value in metrics[:6]:
+            card=QFrame(); card.setObjectName("datasetCard"); cl=QVBoxLayout(card); a=QLabel(label); a.setObjectName("muted"); b=QLabel(value); b.setStyleSheet("font-size: 20px; font-weight: 700; color:#1d4ed8"); cl.addWidget(a); cl.addWidget(b); self.kpi_strip.addWidget(card)
+        self.dashboard_summary.setText(f"Active dataset: {self.active_dataset}. The dashboard uses the same live DataFrame as visual tools and Python Lab.")
+        if numeric:
+            summary=df[numeric].describe().transpose().reset_index().rename(columns={"index":"metric"}).round(3); self.dashboard_table_model.set_dataframe(summary)
+            self.dashboard_figure.clear(); ax=self.dashboard_figure.add_subplot(111); col=numeric[0]; clean=df[col].dropna(); ax.hist(clean,bins=min(20,max(5,int(max(1,len(clean))**.5))),color="#2563eb",edgecolor="white"); ax.set_title(f"Distribution of {col}"); ax.set_xlabel(col); ax.set_ylabel("Frequency"); ax.grid(True,alpha=.2); self.dashboard_canvas.draw()
+        else: self.dashboard_table_model.set_dataframe(pd.DataFrame({"message":["No numeric columns"]}))
+        self.dashboard_insights.setPlainText(self.make_executive_summary())
+
+    def make_executive_summary(self):
+        df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns); cats=list(df.select_dtypes(exclude=np.number).columns); lines=[f"Dataset {self.active_dataset} contains {len(df):,} rows and {len(df.columns)} columns.",f"Data quality: {int(df.isna().sum().sum())} missing cells and {int(df.duplicated().sum())} duplicate rows."]
+        for c in numeric[:3]:
+            series=df[c].dropna()
+            if len(series): lines.append(f"{c}: mean {series.mean():,.2f}, median {series.median():,.2f}, range {series.min():,.2f} to {series.max():,.2f}.")
+        if cats:
+            c=cats[0]; top=df[c].value_counts(dropna=False)
+            if len(top): lines.append(f"Largest {c} segment: {top.index[0]} with {top.iloc[0]:,} records ({top.iloc[0]/max(1,len(df))*100:.1f}%).")
+        return "\n".join(lines)
+
+    def kpi_summary(self):
+        self.refresh_dashboard(); self.tabs.setCurrentWidget(self.tabs.widget(0) if self.tabs.tabText(0)=="Dashboard" else next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard"))
+
+    def segment_analysis(self):
+        group=self.choose_column("Segment analysis - dimension"); value=self.choose_column("Segment analysis - measure",True)
+        if group and value:
+            result=self.model.dataframe.groupby(group,dropna=False)[value].agg(records="count",total="sum",average="mean",median="median").reset_index().sort_values("total",ascending=False); result["share_pct"]=(result["total"]/result["total"].sum()*100).round(2); self.apply_dataframe(result,f"Segment analysis: {value} by {group}")
+
+    def trend_analysis(self):
+        time_col=self.choose_column("Trend - date/time"); value=self.choose_column("Trend - measure",True)
+        if time_col and value:
+            raw=self.model.dataframe.copy(); raw[time_col]=pd.to_datetime(raw[time_col],errors="coerce"); freq,ok=QInputDialog.getItem(self,"Trend analysis","Frequency",["D","W","ME","QE","YE"],0,False)
+            if not ok:return
+            result=raw.dropna(subset=[time_col]).set_index(time_col)[value].resample(freq).sum().to_frame(value).reset_index(); result["previous"]=result[value].shift(1); result["growth_pct"]=(result[value].pct_change()*100).round(2); result["moving_avg_3"]=result[value].rolling(3,min_periods=1).mean().round(3); self.apply_dataframe(result,f"Trend analysis: {value} ({freq})")
+
+    def pareto_analysis(self):
+        category=self.choose_column("Pareto - category"); value=self.choose_column("Pareto - measure",True)
+        if category and value:
+            result=self.model.dataframe.groupby(category,dropna=False)[value].sum().reset_index().sort_values(value,ascending=False); total=result[value].sum(); result["share_pct"]=(result[value]/total*100).round(2); result["cumulative_pct"]=result["share_pct"].cumsum().round(2); self.apply_dataframe(result,f"Pareto analysis: {value} by {category}")
+
+    def cohort_table(self):
+        row=self.choose_column("Cohort table - row dimension"); col=self.choose_column("Cohort table - column dimension")
+        if row and col and row!=col:
+            result=pd.crosstab(self.model.dataframe[row],self.model.dataframe[col],margins=True).reset_index(); self.apply_dataframe(result,f"Cohort table: {row} x {col}")
+
+    def executive_summary(self):
+        self.console.setPlainText(self.make_executive_summary()); self.tabs.setCurrentWidget(self.python_page)
 
     def build_data_page(self):
         page = QWidget()
@@ -463,6 +540,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "KPI summary": self.kpi_summary,
+            "Segment analysis": self.segment_analysis,
+            "Trend analysis": self.trend_analysis,
+            "Pareto analysis": self.pareto_analysis,
+            "Cohort table": self.cohort_table,
+            "Executive summary": self.executive_summary,
             "Missing values": self.fill_missing,
             "Duplicates": self.remove_duplicates,
             "Data types": self.infer_types,
@@ -874,7 +957,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -890,6 +973,8 @@ class Workbench(QMainWindow):
             self.active_dataset = payload.get("active_dataset") if payload.get("active_dataset") in datasets else next(iter(datasets))
             self.pipeline_steps = payload.get("pipeline_steps", [])
             self.trained_models = payload.get("trained_models", {})
+            self.metric_definitions = payload.get("metric_definitions", [])
+            self.dashboard_cards = payload.get("dashboard_cards", [])
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
             self.workflow.clear()
@@ -981,6 +1066,7 @@ class Workbench(QMainWindow):
         self.quality.setValue(score)
         self.quality_note.setText(f"{missing} missing cells · {df.duplicated().sum()} duplicate rows")
         self.refresh_chart_columns()
+        if hasattr(self, "dashboard_summary"): self.refresh_dashboard()
         self.status_label.setText(f"{len(df):,} rows  |  {len(df.columns)} columns  |  Quality {score}%")
 
     def apply_styles(self):
