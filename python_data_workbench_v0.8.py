@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.7 Hybrid Analytics Platform")
+        self.setWindowTitle("Python Data Workbench v0.8 Semantic Analytics Platform")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -167,6 +167,9 @@ class Workbench(QMainWindow):
         self.compute_engine = "Auto"
         self.spark_session = None
         self.engine_threshold_rows = 1000000
+        self.relationships = []
+        self.semantic_measures = []
+        self.calculated_columns = []
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -268,6 +271,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Data Model": [("Relationship manager", "Create and validate relationships between datasets"), ("Suggest relationships", "Detect likely key relationships"), ("Calculated column", "Create reusable derived columns"), ("Semantic measure", "Define reusable filtered aggregations"), ("Evaluate measure", "Calculate a semantic measure in current context"), ("Model overview", "Inspect datasets, keys, relationships and measures")],
             "Compute Engine": [("Engine status", "Inspect backend and dataset scale"), ("Convert to Spark", "Create distributed Spark DataFrame"), ("Spark SQL", "Run SQL through PySpark"), ("Cache dataset", "Cache distributed data in memory"), ("Explain plan", "Inspect Spark or DuckDB execution plan"), ("Return to pandas", "Collect a safe result for GUI editing")],
             "Business Analysis": [("Segment analysis", "Compare performance across categories"), ("Trend analysis", "Time trends, growth and moving averages"), ("Pareto analysis", "Rank contributors and cumulative share"), ("Cohort table", "Cross-tab two business dimensions"), ("Executive summary", "Generate a concise analytical narrative"), ("KPI summary", "Refresh dashboard metrics")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles")],
@@ -400,6 +404,12 @@ class Workbench(QMainWindow):
             if definition.get("dataset")==self.active_dataset:
                 value=self.calculate_kpi(definition,df)
                 if value is not None: metrics.append((definition["name"],value))
+        for definition in self.semantic_measures:
+            if definition.get("dataset")==self.active_dataset:
+                try:
+                    value=self.calculate_semantic_measure(definition,df)
+                    display=f"{value:,.2f}" if isinstance(value,(int,float,np.number)) else str(value); metrics.append((definition["name"],display))
+                except Exception: pass
         for label,value in metrics[:8]:
             card=QFrame(); card.setObjectName("datasetCard"); cl=QVBoxLayout(card); a=QLabel(label); a.setObjectName("muted"); b=QLabel(value); b.setStyleSheet("font-size: 20px; font-weight: 700; color:#1d4ed8"); cl.addWidget(a); cl.addWidget(b); self.kpi_strip.addWidget(card)
         self.dashboard_summary.setText(f"Active dataset: {self.active_dataset}. The dashboard uses the same live DataFrame as visual tools and Python Lab.")
@@ -473,6 +483,102 @@ class Workbench(QMainWindow):
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
         return page
+
+    def relationship_manager(self):
+        if len(self.datasets) < 2:
+            QMessageBox.information(self, "Relationships", "Import at least two datasets first."); return
+        dialog=QDialog(self); dialog.setWindowTitle("Relationship Manager"); dialog.resize(650,450); root=QVBoxLayout(dialog)
+        form=QFormLayout(); left_ds=QComboBox(); right_ds=QComboBox(); left_ds.addItems(self.datasets); right_ds.addItems(self.datasets)
+        left_col=QComboBox(); right_col=QComboBox(); cardinality=QComboBox(); cardinality.addItems(["many-to-one", "one-to-many", "one-to-one"])
+        form.addRow("From dataset",left_ds); form.addRow("From column",left_col); form.addRow("To dataset",right_ds); form.addRow("To column",right_col); form.addRow("Cardinality",cardinality); root.addLayout(form)
+        info=QTextEdit(); info.setReadOnly(True); root.addWidget(info)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel); root.addWidget(buttons)
+        def refresh_cols():
+            left_col.clear(); right_col.clear(); left_col.addItems([str(c) for c in self.datasets[left_ds.currentText()].columns]); right_col.addItems([str(c) for c in self.datasets[right_ds.currentText()].columns]); validate()
+        def validate():
+            if not left_col.currentText() or not right_col.currentText(): return
+            l=self.datasets[left_ds.currentText()][left_col.currentText()]; r=self.datasets[right_ds.currentText()][right_col.currentText()]
+            overlap=len(set(l.dropna().astype(str)) & set(r.dropna().astype(str))); info.setPlainText(f"From unique: {l.nunique():,} / {len(l):,}\nTo unique: {r.nunique():,} / {len(r):,}\nMatching distinct values: {overlap:,}\nFrom duplicates: {int(l.duplicated().sum()):,}\nTo duplicates: {int(r.duplicated().sum()):,}")
+        def save():
+            if left_ds.currentText()==right_ds.currentText(): QMessageBox.warning(dialog,"Relationship","Choose two different datasets."); return
+            rel={"from_dataset":left_ds.currentText(),"from_column":left_col.currentText(),"to_dataset":right_ds.currentText(),"to_column":right_col.currentText(),"cardinality":cardinality.currentText(),"active":True}
+            self.relationships=[x for x in self.relationships if not (x["from_dataset"]==rel["from_dataset"] and x["from_column"]==rel["from_column"] and x["to_dataset"]==rel["to_dataset"] and x["to_column"]==rel["to_column"])]; self.relationships.append(rel); dialog.accept()
+        left_ds.currentTextChanged.connect(refresh_cols); right_ds.currentTextChanged.connect(refresh_cols); left_col.currentTextChanged.connect(validate); right_col.currentTextChanged.connect(validate); buttons.accepted.connect(save); buttons.rejected.connect(dialog.reject); refresh_cols(); dialog.exec()
+
+    def suggest_relationships(self):
+        suggestions=[]; names=list(self.datasets)
+        for i,a in enumerate(names):
+            for b in names[i+1:]:
+                adf,bdf=self.datasets[a],self.datasets[b]
+                for ca in adf.columns:
+                    for cb in bdf.columns:
+                        if str(ca).lower()!=str(cb).lower(): continue
+                        av=adf[ca].dropna(); bv=bdf[cb].dropna();
+                        if av.empty or bv.empty: continue
+                        overlap=len(set(av.astype(str)) & set(bv.astype(str))); denom=max(1,min(av.nunique(),bv.nunique())); ratio=overlap/denom
+                        if ratio>=.5:
+                            card="one-to-one" if av.is_unique and bv.is_unique else "one-to-many" if av.is_unique else "many-to-one" if bv.is_unique else "many-to-many candidate"
+                            suggestions.append({"from_dataset":a,"from_column":str(ca),"to_dataset":b,"to_column":str(cb),"cardinality":card,"overlap":round(ratio,3)})
+        text="No likely relationships found." if not suggestions else "\n".join(f"{x['from_dataset']}.{x['from_column']} → {x['to_dataset']}.{x['to_column']} | {x['cardinality']} | overlap {x['overlap']:.0%}" for x in suggestions)
+        self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
+        if suggestions:
+            answer=QMessageBox.question(self,"Suggested relationships",f"Found {len(suggestions)} candidate relationships. Add valid one-to-one/one-to-many/many-to-one suggestions?")
+            if answer==QMessageBox.Yes:
+                for x in suggestions:
+                    if "candidate" not in x["cardinality"]:
+                        rel={k:x[k] for k in ["from_dataset","from_column","to_dataset","to_column","cardinality"]}; rel["active"]=True
+                        if rel not in self.relationships:self.relationships.append(rel)
+
+    def define_calculated_column(self):
+        df=self.model.dataframe
+        name,ok=QInputDialog.getText(self,"Calculated column","New column name",text="calculated_value")
+        if not ok or not name.strip(): return
+        example="output / pressure" if "output" in df.columns and "pressure" in df.columns else (str(df.select_dtypes(include=np.number).columns[0]) if len(df.select_dtypes(include=np.number).columns) else "")
+        expr,ok=QInputDialog.getText(self,"Calculated column","pandas expression",text=example)
+        if not ok or not expr.strip(): return
+        try:
+            result=df.copy(); result[name.strip()]=result.eval(expr); definition={"dataset":self.active_dataset,"name":name.strip(),"expression":expr}; self.calculated_columns=[x for x in self.calculated_columns if not (x["dataset"]==self.active_dataset and x["name"]==name.strip())]; self.calculated_columns.append(definition); self.apply_dataframe(result,f"Calculated column {name.strip()}")
+        except Exception as exc: QMessageBox.critical(self,"Calculated column failed",str(exc))
+
+    def define_semantic_measure(self):
+        df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns)
+        if not numeric: QMessageBox.warning(self,"Measure","No numeric columns available."); return
+        name,ok=QInputDialog.getText(self,"Semantic measure","Measure name",text=f"Total {numeric[0]}")
+        if not ok or not name.strip(): return
+        column,ok=QInputDialog.getItem(self,"Semantic measure","Column",numeric,0,False)
+        if not ok:return
+        aggregation,ok=QInputDialog.getItem(self,"Semantic measure","Aggregation",["sum","mean","median","min","max","count","nunique"],0,False)
+        if not ok:return
+        filter_col,ok=QInputDialog.getItem(self,"Semantic measure","Optional filter column",["No filter"]+[str(c) for c in df.columns],0,False)
+        if not ok:return
+        filter_value=None
+        if filter_col!="No filter":
+            values=[str(x) for x in df[filter_col].dropna().unique()[:500]]; filter_value,ok=QInputDialog.getItem(self,"Semantic measure","Filter value",values,0,False)
+            if not ok:return
+        definition={"name":name.strip(),"dataset":self.active_dataset,"column":column,"aggregation":aggregation,"filter_column":None if filter_col=="No filter" else filter_col,"filter_value":filter_value}
+        self.semantic_measures=[x for x in self.semantic_measures if x["name"]!=definition["name"]]; self.semantic_measures.append(definition); QMessageBox.information(self,"Measure saved",f"Saved semantic measure '{definition['name']}'.")
+
+    def calculate_semantic_measure(self, definition, context=None):
+        df=(context.copy() if context is not None else self.datasets[definition["dataset"]].copy())
+        fc=definition.get("filter_column"); fv=definition.get("filter_value")
+        if fc and fc in df.columns: df=df[df[fc].astype(str)==str(fv)]
+        s=df[definition["column"]]; agg=definition["aggregation"]; return s.nunique() if agg=="nunique" else getattr(s,agg)()
+
+    def evaluate_measure_dialog(self):
+        valid=[m for m in self.semantic_measures if m.get("dataset") in self.datasets]
+        if not valid: QMessageBox.information(self,"Measures","Define a semantic measure first."); return
+        name,ok=QInputDialog.getItem(self,"Evaluate measure","Measure",[m["name"] for m in valid],0,False)
+        if not ok:return
+        definition=next(m for m in valid if m["name"]==name); value=self.calculate_semantic_measure(definition); QMessageBox.information(self,"Measure result",f"{name}\n\n{value:,.4f}" if isinstance(value,(int,float,np.number)) else f"{name}\n\n{value}")
+
+    def model_overview(self):
+        lines=["SEMANTIC DATA MODEL","="*60,"","DATASETS"]
+        for n,df in self.datasets.items(): lines.append(f"• {n}: {len(df):,} rows × {len(df.columns)} columns")
+        lines.extend(["","RELATIONSHIPS"])
+        lines.extend([f"• {r['from_dataset']}.{r['from_column']} → {r['to_dataset']}.{r['to_column']} ({r['cardinality']})" for r in self.relationships] or ["• None defined"])
+        lines.extend(["","CALCULATED COLUMNS"]); lines.extend([f"• {x['dataset']}.{x['name']} = {x['expression']}" for x in self.calculated_columns] or ["• None defined"])
+        lines.extend(["","MEASURES"]); lines.extend([f"• {m['name']}: {m['aggregation'].upper()}({m['dataset']}.{m['column']})" + (f" where {m['filter_column']} = {m['filter_value']}" if m.get('filter_column') else "") for m in self.semantic_measures] or ["• None defined"])
+        self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
 
     def change_engine(self, name):
         self.compute_engine = name
@@ -752,6 +858,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "Relationship manager": self.relationship_manager,
+            "Suggest relationships": self.suggest_relationships,
+            "Calculated column": self.define_calculated_column,
+            "Semantic measure": self.define_semantic_measure,
+            "Evaluate measure": self.evaluate_measure_dialog,
+            "Model overview": self.model_overview,
             "Engine status": self.show_engine_status,
             "Convert to Spark": self.convert_to_spark,
             "Spark SQL": self.run_spark_sql_dialog,
@@ -1181,7 +1293,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -1204,6 +1316,9 @@ class Workbench(QMainWindow):
             self.dashboard_filters = payload.get("dashboard_filters", {})
             self.compute_engine = payload.get("compute_engine", "Auto")
             self.engine_threshold_rows = payload.get("engine_threshold_rows", 1000000)
+            self.relationships = payload.get("relationships", [])
+            self.semantic_measures = payload.get("semantic_measures", [])
+            self.calculated_columns = payload.get("calculated_columns", [])
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
