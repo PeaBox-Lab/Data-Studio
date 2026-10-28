@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.10 Large Data Analytics Platform")
+        self.setWindowTitle("Python Data Workbench v0.11 Dashboard Designer 2.0")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -176,6 +176,10 @@ class Workbench(QMainWindow):
         self.lazy_sources = {}
         self.preview_limit = 10000
         self.materialization_limit = 500000
+        self.dashboard_definitions = {}
+        self.active_dashboard = None
+        self.dashboard_tile_counter = 0
+        self.dashboard_cross_filter = None
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -277,6 +281,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Dashboard Studio": [("New dashboard", "Create a persistent multi-visual dashboard"), ("Add KPI tile", "Add semantic measure or numeric KPI"), ("Add chart tile", "Add configurable chart visual"), ("Add table tile", "Add detail table with selected columns"), ("Dashboard layout", "Reorder, resize and configure tiles"), ("Dashboard package", "Import or export dashboard JSON")],
             "Large Data": [("Attach large file", "Query CSV or Parquet lazily with DuckDB"), ("Lazy source manager", "Inspect attached larger-than-memory sources"), ("Materialize preview", "Create a bounded editable DataFrame"), ("Large-data SQL", "Run SQL without loading the source into pandas"), ("Engine-routed pipeline", "Execute supported pipeline steps through DuckDB"), ("Source profile", "Profile a lazy source using SQL")],
             "Pipeline Studio": [("New pipeline", "Create a parameterized workflow"), ("Add cleaning step", "Reusable cleanup operation"), ("Add filter step", "Parameterized row filtering"), ("Add calculated step", "Reusable calculated column"), ("Pipeline editor", "Reorder, preview and execute"), ("Import / export pipeline", "Portable JSON definitions")],
             "Data Model": [("Relationship manager", "Create and validate relationships between datasets"), ("Suggest relationships", "Detect likely key relationships"), ("Calculated column", "Create reusable derived columns"), ("Semantic measure", "Define reusable filtered aggregations"), ("Evaluate measure", "Calculate a semantic measure in current context"), ("Model overview", "Inspect datasets, keys, relationships and measures")],
@@ -376,6 +381,170 @@ class Workbench(QMainWindow):
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
 
+    def next_dashboard_tile_id(self):
+        self.dashboard_tile_counter += 1
+        return f"tile_{self.dashboard_tile_counter:04d}"
+
+    def ensure_dashboard_v2(self):
+        if self.active_dashboard in self.dashboard_definitions:
+            return self.dashboard_definitions[self.active_dashboard]
+        self.new_dashboard_v2()
+        return self.dashboard_definitions.get(self.active_dashboard)
+
+    def new_dashboard_v2(self):
+        name, ok = QInputDialog.getText(self, "New dashboard", "Dashboard name", text="Executive Dashboard")
+        if not ok or not name.strip(): return
+        name = name.strip()
+        if name in self.dashboard_definitions and QMessageBox.question(self, "Dashboard exists", f"Replace '{name}'?") != QMessageBox.Yes: return
+        self.dashboard_definitions[name] = {"name": name, "dataset": self.active_dataset, "tiles": [], "slicers": [], "schema_version": 2}
+        self.active_dashboard = name
+        self.render_dashboard_v2()
+
+    def add_dashboard_kpi_tile(self):
+        dash = self.ensure_dashboard_v2()
+        if not dash: return
+        options = [m["name"] for m in self.semantic_measures if m.get("dataset") == dash["dataset"]]
+        numeric = list(self.datasets[dash["dataset"]].select_dtypes(include=np.number).columns)
+        options += [f"SUM::{c}" for c in numeric] + [f"AVG::{c}" for c in numeric]
+        if not options: QMessageBox.information(self, "KPI tile", "Define a semantic measure or use a numeric dataset first."); return
+        measure, ok = QInputDialog.getItem(self, "KPI tile", "Measure", options, 0, False)
+        if not ok: return
+        title, ok = QInputDialog.getText(self, "KPI tile", "Title", text=measure.replace("::", " "))
+        if not ok: return
+        dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "kpi", "title": title, "measure": measure, "width": 1, "height": 1, "enabled": True})
+        self.render_dashboard_v2()
+
+    def add_dashboard_chart_tile(self):
+        dash = self.ensure_dashboard_v2()
+        if not dash: return
+        df = self.datasets[dash["dataset"]]
+        chart, ok = QInputDialog.getItem(self, "Chart tile", "Chart type", ["bar", "line", "scatter", "histogram", "box"], 0, False)
+        if not ok: return
+        x, ok = QInputDialog.getItem(self, "Chart tile", "X / category", list(df.columns), 0, False)
+        if not ok: return
+        nums = list(df.select_dtypes(include=np.number).columns)
+        y = None
+        if chart != "histogram":
+            if not nums: QMessageBox.warning(self, "Chart", "No numeric columns available."); return
+            y, ok = QInputDialog.getItem(self, "Chart tile", "Y measure", nums, 0, False)
+            if not ok: return
+        else: y = x
+        title, ok = QInputDialog.getText(self, "Chart tile", "Title", text=f"{y} by {x}" if y != x else f"Distribution of {x}")
+        if not ok: return
+        dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "chart", "chart": chart, "title": title, "x": x, "y": y, "width": 2, "height": 2, "enabled": True})
+        self.render_dashboard_v2()
+
+    def add_dashboard_table_tile(self):
+        dash = self.ensure_dashboard_v2()
+        if not dash: return
+        df = self.datasets[dash["dataset"]]
+        text, ok = QInputDialog.getText(self, "Table tile", "Columns (comma separated)", text=", ".join(map(str, list(df.columns)[:5])))
+        if not ok: return
+        cols = [c.strip() for c in text.split(",") if c.strip() in df.columns]
+        if not cols: QMessageBox.warning(self, "Table", "No valid columns selected."); return
+        dash["tiles"].append({"id": self.next_dashboard_tile_id(), "type": "table", "title": "Details", "columns": cols, "width": 3, "height": 2, "enabled": True})
+        self.render_dashboard_v2()
+
+    def dashboard_context_df(self, dash):
+        df = self.datasets.get(dash.get("dataset"), self.model.dataframe).copy()
+        for slicer in dash.get("slicers", []):
+            value = slicer.get("value")
+            if value not in (None, "", "All") and slicer.get("column") in df.columns:
+                df = df[df[slicer["column"]].astype(str) == str(value)]
+        if self.dashboard_cross_filter:
+            c, v = self.dashboard_cross_filter
+            if c in df.columns: df = df[df[c].astype(str) == str(v)]
+        return df
+
+    def evaluate_dashboard_kpi(self, dash, measure, df):
+        if measure.startswith("SUM::"):
+            return df[measure.split("::",1)[1]].sum()
+        if measure.startswith("AVG::"):
+            return df[measure.split("::",1)[1]].mean()
+        match = next((m for m in self.semantic_measures if m["name"] == measure), None)
+        return self.calculate_semantic_measure(match, df) if match else None
+
+    def render_dashboard_v2(self):
+        if not hasattr(self, "dashboard_tiles_layout"): return
+        while self.dashboard_tiles_layout.count():
+            item = self.dashboard_tiles_layout.takeAt(0); w = item.widget()
+            if w: w.deleteLater()
+        if self.active_dashboard not in self.dashboard_definitions:
+            label = QLabel("Create a Dashboard Studio dashboard to compose multiple visuals."); label.setObjectName("muted"); self.dashboard_tiles_layout.addWidget(label); return
+        dash = self.dashboard_definitions[self.active_dashboard]; df = self.dashboard_context_df(dash)
+        title = QLabel(f"{dash['name']}  |  {len(df):,} rows in context"); title.setObjectName("pageTitle"); self.dashboard_tiles_layout.addWidget(title)
+        # slicers
+        slicer_row = QHBoxLayout()
+        for slicer in dash.get("slicers", []):
+            box = QComboBox(); box.addItem("All"); col = slicer["column"]
+            if col in self.datasets[dash["dataset"]].columns: box.addItems([str(x) for x in self.datasets[dash["dataset"]][col].dropna().unique()[:250]])
+            if slicer.get("value"): box.setCurrentText(str(slicer["value"]))
+            def change(v, s=slicer): s["value"] = None if v == "All" else v; self.render_dashboard_v2()
+            box.currentTextChanged.connect(change); slicer_row.addWidget(QLabel(col)); slicer_row.addWidget(box)
+        if dash.get("slicers"): self.dashboard_tiles_layout.addLayout(slicer_row)
+        # tiles, two visual cards per row by default
+        row = QHBoxLayout(); count = 0
+        for tile in [t for t in dash["tiles"] if t.get("enabled", True)]:
+            frame = QFrame(); frame.setObjectName("toolCard"); fl = QVBoxLayout(frame); heading = QLabel(tile.get("title", tile["type"])); heading.setObjectName("toolTitle"); fl.addWidget(heading)
+            if tile["type"] == "kpi":
+                value = self.evaluate_dashboard_kpi(dash, tile["measure"], df); lab = QLabel(f"{value:,.2f}" if isinstance(value,(int,float,np.number)) else str(value)); lab.setStyleSheet("font-size:28px;font-weight:700;color:#1d4ed8"); fl.addWidget(lab)
+            elif tile["type"] == "table":
+                table = QTableView(); model = DataFrameModel(df[tile["columns"]].head(200)); table.setModel(model); table.horizontalHeader().setStretchLastSection(True); fl.addWidget(table)
+            else:
+                fig = Figure(figsize=(5,2.6), tight_layout=True); canvas = FigureCanvas(fig); ax = fig.add_subplot(111); x,y,kind = tile["x"],tile["y"],tile["chart"]
+                try:
+                    if kind == "histogram": ax.hist(pd.to_numeric(df[y], errors="coerce").dropna(), bins=20, color="#2563eb")
+                    elif kind == "bar":
+                        grouped=df.groupby(x,dropna=False)[y].sum().sort_values(ascending=False).head(20); ax.bar(grouped.index.astype(str), grouped.values, color="#2563eb"); ax.tick_params(axis="x",rotation=45)
+                    elif kind == "line": ax.plot(df[x], df[y], marker="o", linewidth=1)
+                    elif kind == "scatter": ax.scatter(df[x], df[y], alpha=.7)
+                    else: ax.boxplot(pd.to_numeric(df[y],errors="coerce").dropna(), labels=[y])
+                    ax.grid(True,alpha=.2)
+                except Exception as exc: ax.text(.5,.5,str(exc),ha="center",va="center")
+                fl.addWidget(canvas)
+            row.addWidget(frame); count += 1
+            if count % 2 == 0: self.dashboard_tiles_layout.addLayout(row); row = QHBoxLayout()
+        if count % 2: self.dashboard_tiles_layout.addLayout(row)
+
+    def open_dashboard_layout_editor(self):
+        dash = self.ensure_dashboard_v2()
+        if not dash: return
+        d=QDialog(self); d.setWindowTitle(f"Dashboard Layout - {dash['name']}"); d.resize(760,520); root=QVBoxLayout(d); tiles=QListWidget(); root.addWidget(tiles,1)
+        def refresh():
+            tiles.clear()
+            for i,t in enumerate(dash["tiles"],1): tiles.addItem(f"{i}. [{'ON' if t.get('enabled',True) else 'OFF'}] {t['title']} | {t['type']} | {t['id']}")
+        controls=QHBoxLayout(); root.addLayout(controls)
+        def move(delta):
+            i=tiles.currentRow(); j=i+delta
+            if i>=0 and 0<=j<len(dash["tiles"]): dash["tiles"][i],dash["tiles"][j]=dash["tiles"][j],dash["tiles"][i]; refresh(); tiles.setCurrentRow(j)
+        def toggle():
+            i=tiles.currentRow()
+            if i>=0: dash["tiles"][i]["enabled"]=not dash["tiles"][i].get("enabled",True); refresh(); tiles.setCurrentRow(i)
+        def delete():
+            i=tiles.currentRow()
+            if i>=0: dash["tiles"].pop(i); refresh(); self.render_dashboard_v2()
+        def slicer():
+            col,ok=QInputDialog.getItem(d,"Add slicer","Column",list(self.datasets[dash["dataset"]].columns),0,False)
+            if ok and col and not any(x["column"]==col for x in dash["slicers"]): dash["slicers"].append({"column":col,"value":None}); self.render_dashboard_v2()
+        for label,fn in [("Up",lambda:move(-1)),("Down",lambda:move(1)),("Enable/Disable",toggle),("Delete",delete),("Add slicer",slicer)]: b=QPushButton(label); b.clicked.connect(fn); controls.addWidget(b)
+        done=QDialogButtonBox(QDialogButtonBox.Close); done.rejected.connect(d.reject); root.addWidget(done); refresh(); d.exec(); self.render_dashboard_v2()
+
+    def dashboard_import_export(self):
+        action,ok=QInputDialog.getItem(self,"Dashboard package","Action",["Export active dashboard","Import dashboard"],0,False)
+        if not ok:return
+        if action.startswith("Export"):
+            if self.active_dashboard not in self.dashboard_definitions:return
+            path,_=QFileDialog.getSaveFileName(self,"Export dashboard",f"{self.active_dashboard}.dashboard.json","Dashboard JSON (*.json)")
+            if path: Path(path).write_text(json.dumps(self.dashboard_definitions[self.active_dashboard],indent=2),encoding="utf-8")
+        else:
+            path,_=QFileDialog.getOpenFileName(self,"Import dashboard","","Dashboard JSON (*.json)")
+            if not path:return
+            try:
+                dash=json.loads(Path(path).read_text(encoding="utf-8"))
+                if not dash.get("name") or not isinstance(dash.get("tiles"),list): raise ValueError("Invalid dashboard schema")
+                self.dashboard_definitions[dash["name"]]=dash; self.active_dashboard=dash["name"]; self.render_dashboard_v2()
+            except Exception as exc: QMessageBox.critical(self,"Dashboard import failed",str(exc))
+
     def build_dashboard_page(self):
         page = QWidget(); outer = QVBoxLayout(page)
         top = QHBoxLayout(); title = QLabel("Analytics Dashboard"); title.setObjectName("pageTitle")
@@ -388,7 +557,10 @@ class Workbench(QMainWindow):
         self.dashboard_table = QTableView(); self.dashboard_table_model = DataFrameModel(pd.DataFrame()); self.dashboard_table.setModel(self.dashboard_table_model)
         self.dashboard_figure = Figure(figsize=(7,4), tight_layout=True); self.dashboard_canvas = FigureCanvas(self.dashboard_figure)
         split.addWidget(self.dashboard_table); split.addWidget(self.dashboard_canvas); split.setSizes([500,700]); outer.addWidget(split,1)
-        self.dashboard_insights = QTextEdit(); self.dashboard_insights.setReadOnly(True); self.dashboard_insights.setMaximumHeight(150); outer.addWidget(self.dashboard_insights)
+        self.dashboard_insights = QTextEdit(); self.dashboard_insights.setReadOnly(True); self.dashboard_insights.setMaximumHeight(120); outer.addWidget(self.dashboard_insights)
+        self.dashboard_tiles_area = QScrollArea(); self.dashboard_tiles_area.setWidgetResizable(True)
+        self.dashboard_tiles_host = QWidget(); self.dashboard_tiles_layout = QVBoxLayout(self.dashboard_tiles_host); self.dashboard_tiles_layout.setAlignment(Qt.AlignTop)
+        self.dashboard_tiles_area.setWidget(self.dashboard_tiles_host); outer.addWidget(self.dashboard_tiles_area, 1)
         return page
 
     def clear_layout(self, layout):
@@ -1130,6 +1302,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "New dashboard": self.new_dashboard_v2,
+            "Add KPI tile": self.add_dashboard_kpi_tile,
+            "Add chart tile": self.add_dashboard_chart_tile,
+            "Add table tile": self.add_dashboard_table_tile,
+            "Dashboard layout": self.open_dashboard_layout_editor,
+            "Dashboard package": self.dashboard_import_export,
             "Attach large file": self.attach_large_file,
             "Lazy source manager": self.lazy_source_manager,
             "Materialize preview": self.materialize_lazy_preview,
@@ -1577,7 +1755,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -1609,6 +1787,9 @@ class Workbench(QMainWindow):
             self.lazy_sources = payload.get("lazy_sources", {})
             self.preview_limit = payload.get("preview_limit", 10000)
             self.materialization_limit = payload.get("materialization_limit", 500000)
+            self.dashboard_definitions = payload.get("dashboard_definitions", {})
+            self.active_dashboard = payload.get("active_dashboard")
+            self.dashboard_tile_counter = payload.get("dashboard_tile_counter", 0)
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
