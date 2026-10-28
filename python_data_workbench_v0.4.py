@@ -1,5 +1,7 @@
 import sys
 import traceback
+import json
+import pickle
 from pathlib import Path
 
 try:
@@ -149,20 +151,25 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.3")
+        self.setWindowTitle("Python Data Workbench v0.4")
         self.resize(1450, 900)
         self.history = []
-        self.model = DataFrameModel(SAMPLE_DATA)
+        self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
+        self.active_dataset = "sensor_readings"
+        self.pipeline_steps = []
+        self.trained_models = {}
+        self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
         self.apply_styles()
+        self.refresh_dataset_list()
         self.refresh_status()
 
     def build_ui(self):
         toolbar = QToolBar("Main")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
-        for text, callback in [("Import", self.import_data), ("Export", self.export_data), ("Save snapshot", self.snapshot), ("Undo", self.undo)]:
+        for text, callback in [("Import", self.import_data), ("Export", self.export_data), ("Save project", self.save_project), ("Open project", self.open_project), ("Save snapshot", self.snapshot), ("Undo", self.undo)]:
             action = QAction(text, self)
             action.triggered.connect(callback)
             toolbar.addAction(action)
@@ -170,6 +177,9 @@ class Workbench(QMainWindow):
         python_action = QAction("Python Lab", self)
         python_action.triggered.connect(lambda: self.tabs.setCurrentWidget(self.python_page))
         toolbar.addAction(python_action)
+        pipeline_action = QAction("Export workflow", self)
+        pipeline_action.triggered.connect(self.export_pipeline)
+        toolbar.addAction(pipeline_action)
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -209,16 +219,19 @@ class Workbench(QMainWindow):
         heading = QLabel("PROJECT")
         heading.setObjectName("sectionHeading")
         layout.addWidget(heading)
-        dataset = QFrame()
-        dataset.setObjectName("datasetCard")
-        dl = QVBoxLayout(dataset)
+        controls = QHBoxLayout()
+        add_data = QPushButton("+ Dataset"); add_data.clicked.connect(self.import_data)
+        remove_data = QPushButton("Remove"); remove_data.clicked.connect(self.remove_dataset)
+        controls.addWidget(add_data); controls.addWidget(remove_data)
+        layout.addLayout(controls)
+        self.dataset_list = QListWidget()
+        self.dataset_list.setMaximumHeight(150)
+        self.dataset_list.itemSelectionChanged.connect(self.switch_dataset)
+        layout.addWidget(self.dataset_list)
         self.dataset_name = QLabel("sensor_readings")
         self.dataset_name.setObjectName("toolTitle")
-        self.dataset_size = QLabel()
-        self.dataset_size.setObjectName("muted")
-        dl.addWidget(self.dataset_name)
-        dl.addWidget(self.dataset_size)
-        layout.addWidget(dataset)
+        self.dataset_size = QLabel(); self.dataset_size.setObjectName("muted")
+        layout.addWidget(self.dataset_name); layout.addWidget(self.dataset_size)
         layout.addWidget(QLabel("Data quality"))
         self.quality = QProgressBar()
         self.quality.setRange(0, 100)
@@ -239,7 +252,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Statistics": [("Descriptive statistics", "Mean, spread and percentiles"), ("Hypothesis tests", "t-test, ANOVA and chi-square"), ("Regression", "Linear and logistic models"), ("Reliability", "Failure and survival analysis"), ("Quality control", "SPC and capability"), ("Experimental design", "Power and sample size")],
-            "Data Science": [("Train model", "Classification or regression with automatic preprocessing"), ("Compare models", "Cross-validated model leaderboard"), ("Forecast", "Time-series prediction"), ("Cluster", "K-means segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Anomaly detection", "Isolation-based detection")],
+            "Data Science": [("Train model", "Classification or regression with automatic preprocessing"), ("Compare models", "Cross-validated model leaderboard"), ("Forecast", "Time-series prediction"), ("Cluster", "K-means segmentation"), ("Feature engineering", "Scale, encode and derive"), ("Anomaly detection", "Isolation-based detection"), ("Save model", "Persist a trained model artifact"), ("Batch predict", "Apply saved model to another dataset")],
             "Engineering": [("Units", "Unit conversion"), ("Signal processing", "FFT, filtering and peaks"), ("Numerical methods", "Integration and equation solving"), ("Optimization", "Constrained solving"), ("Simulation", "Monte Carlo analysis"), ("Matrix operations", "Linear algebra")],
         }
         for section, cards in definitions.items():
@@ -415,7 +428,7 @@ class Workbench(QMainWindow):
             result = namespace.get("df")
             if self.auto_return.isChecked() and not isinstance(result, pd.DataFrame): raise TypeError("Variable 'df' must remain a pandas DataFrame")
             if self.auto_return.isChecked():
-                self.push_history(); self.model.set_dataframe(result); self.workflow.addItem(f"{self.workflow.count()+1}. {label}")
+                self.push_history(); self.model.set_dataframe(result); self.datasets[self.active_dataset] = result.copy(); self.workflow.addItem(f"{self.workflow.count()+1}. {label}")
             visible = {k:v for k,v in namespace.items() if not k.startswith("__")}
             self.update_variable_explorer(visible)
             preview = result.head(20).to_string() if isinstance(result, pd.DataFrame) else repr(result)
@@ -473,6 +486,8 @@ class Workbench(QMainWindow):
             "Forecast": self.forecast,
             "Cluster": self.cluster_data,
             "Anomaly detection": self.ml_anomaly,
+            "Save model": self.save_trained_model,
+            "Batch predict": self.batch_predict,
             "Signal processing": self.signal_processing,
             "Optimization": self.optimize_process,
             "Simulation": self.monte_carlo,
@@ -490,6 +505,8 @@ class Workbench(QMainWindow):
     def apply_dataframe(self, df, step):
         self.push_history()
         self.model.set_dataframe(df)
+        self.datasets[self.active_dataset] = df.copy()
+        self.pipeline_steps.append({"dataset": self.active_dataset, "step": step})
         self.workflow.addItem(f"{self.workflow.count()+1}. {step}")
         self.tabs.setCurrentIndex(self.tabs.indexOf(self.data_page()) if self.data_page() else 5)
         self.refresh_status()
@@ -577,6 +594,7 @@ class Workbench(QMainWindow):
             model=Pipeline([("preprocess",pre),("model",estimator)])
             Xtr,Xte,ytr,yte=train_test_split(X,y,test_size=.25,random_state=42,stratify=y if classification and y.value_counts().min()>=2 else None)
             model.fit(Xtr,ytr); pred=model.predict(Xte)
+            self.trained_models[target] = {"model": model, "features": list(X.columns), "target": target, "classification": classification}
             if classification: report=f"Accuracy: {accuracy_score(yte,pred):.4f}\n\n{classification_report(yte,pred,zero_division=0)}"
             else: report=f"R-squared: {r2_score(yte,pred):.4f}\nMAE: {mean_absolute_error(yte,pred):.4f}"
             df[f"ml_prediction_{target}"]=model.predict(df.drop(columns=[target]))
@@ -809,6 +827,103 @@ class Workbench(QMainWindow):
             summary = pd.DataFrame({"metric": ["mean", "std", "p05", "p50", "p95"], "value": [simulations.mean(), simulations.std(), *np.quantile(simulations, [.05, .5, .95])]})
             self.apply_dataframe(summary, f"Monte Carlo simulation for {col}")
 
+    def unique_dataset_name(self, base):
+        name = base or "dataset"
+        counter = 2
+        while name in self.datasets:
+            name = f"{base}_{counter}"; counter += 1
+        return name
+
+    def refresh_dataset_list(self, select=None):
+        if not hasattr(self, "dataset_list"): return
+        target = select or self.active_dataset
+        self.dataset_list.blockSignals(True)
+        self.dataset_list.clear()
+        for name, df in self.datasets.items():
+            item = QListWidgetItem(f"{name}  ({len(df):,} × {len(df.columns)})")
+            item.setData(Qt.UserRole, name)
+            self.dataset_list.addItem(item)
+            if name == target: self.dataset_list.setCurrentItem(item)
+        self.dataset_list.blockSignals(False)
+
+    def switch_dataset(self):
+        item = self.dataset_list.currentItem() if hasattr(self, "dataset_list") else None
+        if not item: return
+        name = item.data(Qt.UserRole)
+        if name == self.active_dataset: return
+        self.datasets[self.active_dataset] = self.model.dataframe.copy()
+        self.active_dataset = name
+        self.model.set_dataframe(self.datasets[name])
+        self.python_base_df = self.model.dataframe.copy()
+        self.refresh_status()
+
+    def remove_dataset(self):
+        if len(self.datasets) <= 1:
+            QMessageBox.warning(self, "Remove dataset", "A project must retain at least one dataset."); return
+        name = self.active_dataset
+        answer = QMessageBox.question(self, "Remove dataset", f"Remove {name} from this project?")
+        if answer != QMessageBox.Yes: return
+        del self.datasets[name]
+        self.active_dataset = next(iter(self.datasets))
+        self.model.set_dataframe(self.datasets[self.active_dataset])
+        self.refresh_dataset_list(); self.refresh_status()
+
+    def save_project(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save project", "workbench_project.pdw", "Python Data Workbench (*.pdw)")
+        if not path: return
+        if not path.lower().endswith(".pdw"): path += ".pdw"
+        try:
+            self.datasets[self.active_dataset] = self.model.dataframe.copy()
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models}
+            with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            self.statusBar().showMessage(f"Project saved: {path}", 5000)
+        except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
+
+    def open_project(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Python Data Workbench (*.pdw)")
+        if not path: return
+        try:
+            with open(path, "rb") as handle: payload = pickle.load(handle)
+            datasets = payload.get("datasets", {})
+            if not datasets: raise ValueError("Project contains no datasets.")
+            self.datasets = datasets
+            self.active_dataset = payload.get("active_dataset") if payload.get("active_dataset") in datasets else next(iter(datasets))
+            self.pipeline_steps = payload.get("pipeline_steps", [])
+            self.trained_models = payload.get("trained_models", {})
+            self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
+            self.model.set_dataframe(self.datasets[self.active_dataset])
+            self.workflow.clear()
+            for i, step in enumerate(self.pipeline_steps, 1): self.workflow.addItem(f"{i}. [{step.get('dataset','')}] {step.get('step','')}")
+            self.refresh_dataset_list(); self.refresh_status()
+        except Exception as exc: QMessageBox.critical(self, "Open project failed", str(exc))
+
+    def save_trained_model(self):
+        if not self.trained_models:
+            QMessageBox.information(self, "Save model", "Train a model first."); return
+        target, ok = QInputDialog.getItem(self, "Save model", "Model target", list(self.trained_models), 0, False)
+        if not ok: return
+        path, _ = QFileDialog.getSaveFileName(self, "Save model", f"{target}_model.pkl", "Pickle model (*.pkl)")
+        if path:
+            with open(path, "wb") as handle: pickle.dump(self.trained_models[target], handle, protocol=pickle.HIGHEST_PROTOCOL)
+            self.statusBar().showMessage(f"Model saved: {path}", 5000)
+
+    def batch_predict(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose saved model", "", "Pickle model (*.pkl)")
+        if not path: return
+        try:
+            with open(path, "rb") as handle: artifact = pickle.load(handle)
+            features = artifact["features"]; target = artifact["target"]; model = artifact["model"]
+            missing = [c for c in features if c not in self.model.dataframe.columns]
+            if missing: raise ValueError("Active dataset is missing model features: " + ", ".join(missing))
+            df = self.model.dataframe.copy()
+            df[f"prediction_{target}"] = model.predict(df[features])
+            self.apply_dataframe(df, f"Batch predict {target}")
+        except Exception as exc: QMessageBox.critical(self, "Batch prediction failed", str(exc))
+
+    def export_pipeline(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export workflow", "workflow.json", "JSON (*.json)")
+        if path: Path(path).write_text(json.dumps(self.pipeline_steps, indent=2), encoding="utf-8")
+
     def import_data(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import data", "", "Data files (*.csv *.xlsx *.xls *.json *.parquet)")
         if not path:
@@ -820,9 +935,13 @@ class Workbench(QMainWindow):
             elif suffix == ".json": df = pd.read_json(path)
             elif suffix == ".parquet": df = pd.read_parquet(path)
             else: raise ValueError("Unsupported file format")
+            name = self.unique_dataset_name(Path(path).stem)
+            self.datasets[name] = df.copy()
+            self.active_dataset = name
             self.model.set_dataframe(df)
-            self.dataset_name.setText(Path(path).stem)
-            self.workflow.clear(); self.workflow.addItem("1. Import data")
+            self.refresh_dataset_list(select=name)
+            self.workflow.addItem(f"{self.workflow.count()+1}. Import {name}")
+            self.pipeline_steps.append({"dataset": name, "step": "Import data"})
             self.tabs.setCurrentWidget(self.data_page())
         except Exception as exc:
             QMessageBox.critical(self, "Import failed", str(exc))
@@ -847,6 +966,7 @@ class Workbench(QMainWindow):
     def undo(self):
         if self.history:
             self.model.set_dataframe(self.history.pop())
+            self.datasets[self.active_dataset] = self.model.dataframe.copy()
             self.workflow.addItem(f"{self.workflow.count()+1}. Undo")
 
     def refresh_status(self):
@@ -854,7 +974,10 @@ class Workbench(QMainWindow):
         missing = int(df.isna().sum().sum()) if not df.empty else 0
         cells = max(1, df.size)
         score = int(100 * (1 - missing / cells))
+        self.dataset_name.setText(self.active_dataset)
         self.dataset_size.setText(f"{len(df):,} rows × {len(df.columns)} columns")
+        if self.active_dataset in self.datasets:
+            self.datasets[self.active_dataset] = df.copy()
         self.quality.setValue(score)
         self.quality_note.setText(f"{missing} missing cells · {df.duplicated().sum()} duplicate rows")
         self.refresh_chart_columns()
