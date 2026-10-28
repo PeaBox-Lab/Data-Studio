@@ -152,7 +152,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Python Data Workbench v0.12 Advanced Business Analytics")
+        self.setWindowTitle("Python Data Workbench v0.13 Statistics Studio")
         self.resize(1450, 900)
         self.history = []
         self.datasets = {"sensor_readings": SAMPLE_DATA.copy()}
@@ -181,6 +181,7 @@ class Workbench(QMainWindow):
         self.dashboard_tile_counter = 0
         self.dashboard_cross_filter = None
         self.analytics_pack_results = {}
+        self.statistics_results = {}
         self.model = DataFrameModel(self.datasets[self.active_dataset])
         self.model.changed.connect(self.refresh_status)
         self.build_ui()
@@ -282,6 +283,7 @@ class Workbench(QMainWindow):
             "Prepare": [("Missing values", "Fill, interpolate or remove"), ("Duplicates", "Remove exact duplicate rows"), ("Data types", "Infer and convert types"), ("Text cleanup", "Trim and standardize text"), ("Join tables", "Merge another dataset"), ("Pivot / reshape", "Pivot, melt and aggregate")],
             "Explore": [("Data profile", "Summary, types and nulls"), ("Distributions", "Describe numeric distributions"), ("Correlation", "Numeric correlation matrix"), ("Outliers", "Detect using IQR"), ("Group analysis", "Aggregate by category"), ("Time patterns", "Resample and rolling metrics")],
             "Analytics": [("KPI summary", "Numeric KPIs, quality and coverage"), ("Define KPI", "Reusable calculated business metric"), ("Save pipeline", "Save workflow as reusable recipe"), ("Run pipeline", "Replay a saved visual pipeline"), ("Dashboard designer", "Configure filters and dashboard cards"), ("SQL analysis", "Query all project tables with DuckDB")],
+            "Statistics Studio": [("Guided test", "Choose a statistical test from your data and question"), ("Assumption checks", "Normality, variance and sample diagnostics"), ("Effect size", "Quantify practical significance"), ("Confidence interval", "Estimate mean or difference with uncertainty"), ("Regression diagnostics", "Residuals, influence and model fit checks"), ("Statistics report", "Create a plain-language statistical report")],
             "Business Analytics Packs": [("HR / Workforce Pack", "Headcount, tenure, compensation and movement analytics"), ("Finance Pack", "Budget, actual, variance, margin and growth analytics"), ("Sales Pack", "Revenue, customer, product and RFM analytics"), ("Operations Pack", "Throughput, quality, SLA and utilization analytics"), ("Pack field mapper", "Map source columns to reusable business roles"), ("Pack dashboard", "Build a dashboard from the latest pack output")],
             "Dashboard Studio": [("New dashboard", "Create a persistent multi-visual dashboard"), ("Add KPI tile", "Add semantic measure or numeric KPI"), ("Add chart tile", "Add configurable chart visual"), ("Add table tile", "Add detail table with selected columns"), ("Dashboard layout", "Reorder, resize and configure tiles"), ("Dashboard package", "Import or export dashboard JSON")],
             "Large Data": [("Attach large file", "Query CSV or Parquet lazily with DuckDB"), ("Lazy source manager", "Inspect attached larger-than-memory sources"), ("Materialize preview", "Create a bounded editable DataFrame"), ("Large-data SQL", "Run SQL without loading the source into pandas"), ("Engine-routed pipeline", "Execute supported pipeline steps through DuckDB"), ("Source profile", "Profile a lazy source using SQL")],
@@ -382,6 +384,120 @@ class Workbench(QMainWindow):
         df=self.model.dataframe.copy(); col=self.dashboard_filters.get("column") if self.dashboard_filters else None; value=self.dashboard_filters.get("value") if self.dashboard_filters else None
         if col and col!="No filter" and col in df.columns and value is not None:return df[df[col].astype(str)==str(value)]
         return df
+
+    def choose_group_and_measure(self, title):
+        df=self.model.dataframe
+        groups=list(df.select_dtypes(exclude=np.number).columns)
+        nums=list(df.select_dtypes(include=np.number).columns)
+        if not groups or not nums:
+            QMessageBox.warning(self,title,"This analysis needs at least one categorical and one numeric column."); return None,None
+        group,ok=QInputDialog.getItem(self,title,"Group column",groups,0,False)
+        if not ok:return None,None
+        measure,ok=QInputDialog.getItem(self,title,"Numeric measure",nums,0,False)
+        return (group,measure) if ok else (None,None)
+
+    def store_statistics_result(self, name, text, table=None):
+        self.statistics_results[name]={"text":text,"table":table.to_dict(orient="records") if isinstance(table,pd.DataFrame) else None}
+        self.console.setPlainText(text + ("\n\n"+table.to_string(index=False) if isinstance(table,pd.DataFrame) else "")); self.tabs.setCurrentWidget(self.python_page)
+
+    def guided_statistical_test(self):
+        try:
+            from scipy import stats
+            mode,ok=QInputDialog.getItem(self,"Guided statistical test","Question",["Compare two group means","Compare 3+ group means","Association between two categorical variables","Correlation between two numeric variables","Compare paired measurements"],0,False)
+            if not ok:return
+            df=self.model.dataframe
+            if mode=="Compare two group means":
+                group,measure=self.choose_group_and_measure("Two-group comparison")
+                if not group:return
+                levels=list(df[group].dropna().unique())
+                if len(levels)<2:raise ValueError("The selected group column has fewer than two groups.")
+                a=df.loc[df[group]==levels[0],measure].dropna(); b=df.loc[df[group]==levels[1],measure].dropna(); stat,p=stats.ttest_ind(a,b,equal_var=False)
+                pooled=((a.var(ddof=1)+b.var(ddof=1))/2)**.5; d=(a.mean()-b.mean())/pooled if pooled else np.nan
+                text=f"Welch independent-samples t-test\n{levels[0]}: n={len(a)}, mean={a.mean():.4f}\n{levels[1]}: n={len(b)}, mean={b.mean():.4f}\nt={stat:.4f}, p={p:.6g}, Cohen's d={d:.4f}\nInterpretation: {'statistically significant' if p<.05 else 'not statistically significant'} at alpha=.05."
+            elif mode=="Compare 3+ group means":
+                group,measure=self.choose_group_and_measure("ANOVA")
+                levels=[x for x in df[group].dropna().unique()]; samples=[df.loc[df[group]==x,measure].dropna() for x in levels]; samples=[x for x in samples if len(x)>1]
+                if len(samples)<3:raise ValueError("At least three groups with two observations each are required.")
+                stat,p=stats.f_oneway(*samples); text=f"One-way ANOVA\nGroups tested: {len(samples)}\nF={stat:.4f}, p={p:.6g}\nInterpretation: {'evidence of a difference among group means' if p<.05 else 'no statistically significant evidence of different group means'} at alpha=.05."
+            elif mode=="Association between two categorical variables":
+                cats=list(df.select_dtypes(exclude=np.number).columns)
+                if len(cats)<2:raise ValueError("Two categorical columns are required.")
+                a,ok=QInputDialog.getItem(self,"Chi-square","First variable",cats,0,False)
+                if not ok:return
+                b,ok=QInputDialog.getItem(self,"Chi-square","Second variable",cats,1 if len(cats)>1 else 0,False)
+                if not ok:return
+                table=pd.crosstab(df[a],df[b]); chi,p,dof,expected=stats.chi2_contingency(table); n=table.values.sum(); phi2=chi/n; r,k=table.shape; v=(phi2/max(1,min(k-1,r-1)))**.5
+                text=f"Chi-square test of independence\nChi-square={chi:.4f}, df={dof}, p={p:.6g}, Cramer's V={v:.4f}\nInterpretation: {'association detected' if p<.05 else 'no statistically significant association detected'} at alpha=.05."
+            elif mode=="Correlation between two numeric variables":
+                x,y=self.choose_two_numeric("Correlation")
+                if not x:return
+                clean=df[[x,y]].dropna(); r,p=stats.pearsonr(clean[x],clean[y]); rho,sp=stats.spearmanr(clean[x],clean[y]); text=f"Correlation analysis\nN={len(clean)}\nPearson r={r:.4f}, p={p:.6g}\nSpearman rho={rho:.4f}, p={sp:.6g}\nInterpretation: Pearson relationship is {'statistically significant' if p<.05 else 'not statistically significant'} at alpha=.05."
+            else:
+                x,y=self.choose_two_numeric("Paired t-test")
+                if not x:return
+                clean=df[[x,y]].dropna(); stat,p=stats.ttest_rel(clean[x],clean[y]); diff=clean[x]-clean[y]; d=diff.mean()/diff.std(ddof=1) if diff.std(ddof=1) else np.nan; text=f"Paired t-test\nN={len(clean)}\nMean difference={diff.mean():.4f}\nt={stat:.4f}, p={p:.6g}, paired Cohen's d={d:.4f}\nInterpretation: {'significant paired difference' if p<.05 else 'no statistically significant paired difference'} at alpha=.05."
+            self.store_statistics_result(mode,text)
+        except Exception as exc: QMessageBox.critical(self,"Statistical test failed",str(exc))
+
+    def statistics_assumption_checks(self):
+        try:
+            from scipy import stats
+            group,measure=self.choose_group_and_measure("Assumption checks")
+            if not group:return
+            rows=[]; samples=[]
+            for level,part in self.model.dataframe.groupby(group,dropna=False):
+                values=part[measure].dropna(); samples.append(values)
+                if len(values)>=3:
+                    w,p=stats.shapiro(values.sample(min(len(values),5000),random_state=42) if len(values)>5000 else values)
+                else:w,p=np.nan,np.nan
+                rows.append({"group":str(level),"n":len(values),"mean":values.mean(),"std":values.std(ddof=1),"shapiro_W":w,"normality_p":p})
+            lev_stat,lev_p=stats.levene(*[x for x in samples if len(x)>1],center="median") if len([x for x in samples if len(x)>1])>=2 else (np.nan,np.nan)
+            table=pd.DataFrame(rows).round(5); text=f"Assumption checks for {measure} by {group}\nLevene robust variance test: statistic={lev_stat:.4f}, p={lev_p:.6g}\nVariance interpretation: {'variance heterogeneity indicated' if lev_p<.05 else 'no significant evidence of unequal variances'} at alpha=.05.\nShapiro-Wilk is reported by group; for large samples also inspect plots and practical deviations."
+            self.store_statistics_result("Assumption checks",text,table)
+        except Exception as exc: QMessageBox.critical(self,"Assumption checks failed",str(exc))
+
+    def statistics_effect_size(self):
+        try:
+            group,measure=self.choose_group_and_measure("Effect size")
+            if not group:return
+            levels=list(self.model.dataframe[group].dropna().unique())
+            if len(levels)<2:raise ValueError("At least two groups are required.")
+            a=self.model.dataframe.loc[self.model.dataframe[group]==levels[0],measure].dropna(); b=self.model.dataframe.loc[self.model.dataframe[group]==levels[1],measure].dropna(); pooled=np.sqrt(((len(a)-1)*a.var(ddof=1)+(len(b)-1)*b.var(ddof=1))/max(1,len(a)+len(b)-2)); d=(a.mean()-b.mean())/pooled if pooled else np.nan
+            magnitude="small" if abs(d)<.5 else "medium" if abs(d)<.8 else "large"
+            text=f"Effect size\nGroups: {levels[0]} vs {levels[1]}\nCohen's d={d:.4f}\nPractical magnitude using conventional thresholds: {magnitude}.\nThresholds are descriptive conventions, not universal decision rules."
+            self.store_statistics_result("Effect size",text)
+        except Exception as exc: QMessageBox.critical(self,"Effect size failed",str(exc))
+
+    def statistics_confidence_interval(self):
+        try:
+            from scipy import stats
+            col=self.choose_column("Confidence interval",True)
+            if not col:return
+            values=self.model.dataframe[col].dropna(); n=len(values)
+            if n<2:raise ValueError("At least two observations are required.")
+            mean=values.mean(); se=stats.sem(values); lo,hi=stats.t.interval(.95,n-1,loc=mean,scale=se)
+            text=f"95% confidence interval for the mean of {col}\nN={n}\nMean={mean:.6f}\nStandard error={se:.6f}\n95% CI=[{lo:.6f}, {hi:.6f}]\nInterpretation: under the t-based model assumptions, this interval estimates the population mean with 95% confidence coverage over repeated samples."
+            self.store_statistics_result("Confidence interval",text)
+        except Exception as exc: QMessageBox.critical(self,"Confidence interval failed",str(exc))
+
+    def statistics_regression_diagnostics(self):
+        try:
+            from scipy import stats
+            x,y=self.choose_two_numeric("Regression diagnostics")
+            if not x:return
+            clean=self.model.dataframe[[x,y]].dropna(); fit=stats.linregress(clean[x],clean[y]); pred=fit.intercept+fit.slope*clean[x]; resid=clean[y]-pred
+            _,normal_p=stats.shapiro(resid.sample(min(len(resid),5000),random_state=42) if len(resid)>5000 else resid) if len(resid)>=3 else (np.nan,np.nan)
+            rmse=float(np.sqrt(np.mean(resid**2))); mae=float(np.mean(np.abs(resid)))
+            table=pd.DataFrame({x:clean[x],y:clean[y],"predicted":pred,"residual":resid}).head(200).round(5)
+            text=f"Linear regression diagnostics\nModel: {y} = {fit.intercept:.5f} + {fit.slope:.5f} × {x}\nN={len(clean)}\nR-squared={fit.rvalue**2:.5f}\nRMSE={rmse:.5f}\nMAE={mae:.5f}\nSlope p={fit.pvalue:.6g}\nResidual Shapiro-Wilk p={normal_p:.6g}\nInterpretation: {'slope is statistically significant' if fit.pvalue<.05 else 'slope is not statistically significant'} at alpha=.05. Residual normality {'shows evidence of departure' if normal_p<.05 else 'does not show significant departure'} by Shapiro-Wilk."
+            self.store_statistics_result("Regression diagnostics",text,table)
+        except Exception as exc: QMessageBox.critical(self,"Regression diagnostics failed",str(exc))
+
+    def statistics_report(self):
+        if not self.statistics_results: QMessageBox.information(self,"Statistics report","Run a Statistics Studio analysis first."); return
+        lines=["STATISTICS STUDIO REPORT","="*70,f"Dataset: {self.active_dataset}",""]
+        for name,result in self.statistics_results.items(): lines.extend([name.upper(),"-"*len(name),result.get("text",""),""])
+        self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
 
     def map_pack_fields(self, pack, roles):
         df = self.model.dataframe
@@ -1406,6 +1522,12 @@ class Workbench(QMainWindow):
 
     def select_tool(self, name):
         handlers = {
+            "Guided test": self.guided_statistical_test,
+            "Assumption checks": self.statistics_assumption_checks,
+            "Effect size": self.statistics_effect_size,
+            "Confidence interval": self.statistics_confidence_interval,
+            "Regression diagnostics": self.statistics_regression_diagnostics,
+            "Statistics report": self.statistics_report,
             "HR / Workforce Pack": self.run_hr_pack,
             "Finance Pack": self.run_finance_pack,
             "Sales Pack": self.run_sales_pack,
@@ -1865,7 +1987,7 @@ class Workbench(QMainWindow):
         if not path.lower().endswith(".pdw"): path += ".pdw"
         try:
             self.datasets[self.active_dataset] = self.model.dataframe.copy()
-            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results}
+            payload = {"version": "0.4", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results}
             with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
             self.statusBar().showMessage(f"Project saved: {path}", 5000)
         except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
@@ -1901,6 +2023,7 @@ class Workbench(QMainWindow):
             self.active_dashboard = payload.get("active_dashboard")
             self.dashboard_tile_counter = payload.get("dashboard_tile_counter", 0)
             self.analytics_pack_results = payload.get("analytics_pack_results", {})
+            self.statistics_results = payload.get("statistics_results", {})
             self.engine_selector.setCurrentText(self.compute_engine)
             self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
             self.model.set_dataframe(self.datasets[self.active_dataset])
