@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.31
+Data Lineage & Impact Studio: lineage asset graph, downstream dependency traversal and change-impact guidance integrated with data contracts.
 ## v0.30
 Data Contracts & Governance Studio: generated schema contracts, nullability/dtype expectations, learned validation rules, conformance reporting, ownership/versioning foundation and governance workflow.
 ## v0.29
