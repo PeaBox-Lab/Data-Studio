@@ -1,9 +1,0 @@
-Python Data Workbench v0.24 validation
-PASS - Desktop compilation
-PASS - Headless compilation
-PASS - v0.22/v0.23 UX retained
-PASS - Customize Workspace present
-PASS - Theme and density controls present
-PASS - F11 Focus Mode present
-PASS - Scheduler, API, Monitoring and AutoML retained
-PASS - ZIP integrity

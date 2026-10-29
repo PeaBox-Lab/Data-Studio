@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 
-RUNTIME_VERSION = "0.24"
+RUNTIME_VERSION = "0.25"
 
 
 def utc_now() -> str:
@@ -778,3 +778,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
   raise SystemExit(main())
+

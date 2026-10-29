@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.25
+Smart Workspace: context-aware recommendations, next-best-action guidance, and persistence of workspace preferences/recent actions.
 ## v0.24
 Workspace Personalization: theme, density, guidance preferences and F11 Focus Mode shortcut.
 ## v0.23
