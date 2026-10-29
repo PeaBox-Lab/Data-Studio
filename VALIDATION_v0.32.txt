@@ -1,0 +1,12 @@
+PBX Data Eng v0.32 validation
+PASS - Desktop compilation
+PASS - Headless compilation
+PASS - visual lineage studio implemented
+PASS - lineage graph builder implemented in source
+PASS - downstream impact traversal implemented
+PASS - color-coded nodes and directed relationship arrows implemented
+PASS - focus asset selector implemented
+PASS - Ctrl+K and standard lineage routing implemented
+PASS - project payload version 0.32
+PASS - v0.31 feature base retained
+PASS - cumulative changelog, release notes and user guide included

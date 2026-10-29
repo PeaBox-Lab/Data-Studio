@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.32
+Visual Lineage Studio: interactive in-app lineage graph, color-coded asset classes, directed relationships, focus highlighting and hardened lineage/impact methods.
 ## v0.31
 Data Lineage & Impact Studio: lineage asset graph, downstream dependency traversal and change-impact guidance integrated with data contracts.
 ## v0.30

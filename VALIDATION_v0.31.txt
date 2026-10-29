@@ -1,9 +1,0 @@
-PBX Data Eng v0.31 validation
-PASS - Desktop compilation
-PASS - Headless compilation
-PASS - v0.30 Data Contracts retained
-PASS - lineage graph generation implemented
-PASS - downstream impact traversal implemented
-PASS - Ctrl+K/tool routing integration implemented
-PASS - project payload version 0.31
-PASS - cumulative changelog, release notes and user guide included

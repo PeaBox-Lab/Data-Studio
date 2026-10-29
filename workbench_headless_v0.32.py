@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 
-RUNTIME_VERSION = "0.31"
+RUNTIME_VERSION = "0.32"
 
 
 def utc_now() -> str:
