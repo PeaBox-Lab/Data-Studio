@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.27
+Data Quality & Profiling Studio: quality scoring, completeness, duplicates, high-missing/constant/high-cardinality column detection, IQR outlier profiling, and Smart Workspace integration.
 ## v0.26
 Workspace Health & Recovery: readiness scoring, project-risk checks, recovery guidance and persisted smart recommendation state.
 ## v0.25
