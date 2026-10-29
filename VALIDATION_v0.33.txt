@@ -1,0 +1,14 @@
+PBX Data Eng v0.33 validation
+PASS - Desktop compilation
+PASS - Headless compilation
+PASS - contract test suite creation implemented
+PASS - automated contract pass/fail runs implemented
+PASS - JSON test evidence export implemented
+PASS - contract suites and test history persisted
+PASS - lineage PNG export implemented
+PASS - lineage SVG export implemented
+PASS - reusable lineage renderer implemented
+PASS - Ctrl+K/tool routing implemented
+PASS - project payload version 0.33
+PASS - v0.32 feature base retained
+PASS - cumulative changelog, release notes and user guide included

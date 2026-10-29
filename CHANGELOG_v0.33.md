@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.33
+Contract Test Automation and Lineage Export: persistent contract suites, automated pass/fail runs, JSON evidence reports, and lineage export to PNG/SVG.
 ## v0.32
 Visual Lineage Studio: interactive in-app lineage graph, color-coded asset classes, directed relationships, focus highlighting and hardened lineage/impact methods.
 ## v0.31

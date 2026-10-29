@@ -5,6 +5,7 @@ import json
 import pickle
 import re
 import shutil
+from datetime import datetime
 from pathlib import Path
 try:
   import pandas as pd
@@ -20,6 +21,7 @@ try:
   )
   from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
   from matplotlib.figure import Figure
+  from matplotlib import pyplot as plt
 except ImportError as exc:
   print("Missing dependency:", exc)
   print("Run: pip install PySide6 pandas numpy openpyxl pyarrow")
@@ -132,7 +134,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
   def __init__(self):
       super().__init__()
-      self.setWindowTitle("Python Data Workbench v0.32 Visual Lineage Studio")
+      self.setWindowTitle("Python Data Workbench v0.33 Contract Test Automation & Lineage Export")
       self.resize(1450, 900)
       self.current_project_path = None
       self.history = []
@@ -182,6 +184,8 @@ class Workbench(QMainWindow):
       self.ui_compact_mode = False
       self.ui_preferences = {"theme":"Light", "density":"Comfortable", "show_guidance":True}
       self.smart_recommendations = []
+      self.contract_test_suites = {}
+      self.contract_test_runs = []
       self.model = DataFrameModel(self.datasets[self.active_dataset])
       self.model.changed.connect(self.refresh_status)
       self.build_ui()
@@ -2280,7 +2284,7 @@ def predict_batch(request: PredictionRequest):
           row=QFrame(); row.setObjectName("toolCard"); layout=QHBoxLayout(row); text=QVBoxLayout(); a=QLabel(label); a.setObjectName("toolTitle"); b=QLabel(desc); b.setObjectName("muted"); text.addWidget(a); text.addWidget(b); button=QPushButton("Start"); button.clicked.connect(lambda checked=False,f=fn,d=dialog:(d.accept(),f())); layout.addLayout(text,1); layout.addWidget(button); root.addWidget(row)
       close=QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); dialog.exec()
   def open_command_palette(self):
-      actions=[("Lineage visualization",self.show_lineage_visualization),("Data lineage",self.show_data_lineage),("Data contracts",self.show_data_contracts),("Validation rules",self.show_validation_rules),("Cleaning plan",self.show_cleaning_plan),("Data quality profile",self.show_data_quality_profile),("Workspace health",self.show_workspace_health),("Smart recommendations",self.show_smart_recommendations),("Customize workspace",self.customize_workspace),("Workspace overview",self.show_workspace_overview),("Recent actions",self.show_recent_actions),("Toggle focus mode",self.toggle_focus_mode),("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
+      actions=[("Contract test automation",self.show_contract_test_automation),("Export lineage",self.export_lineage_dialog),("Lineage visualization",self.show_lineage_visualization),("Data lineage",self.show_data_lineage),("Data contracts",self.show_data_contracts),("Validation rules",self.show_validation_rules),("Cleaning plan",self.show_cleaning_plan),("Data quality profile",self.show_data_quality_profile),("Workspace health",self.show_workspace_health),("Smart recommendations",self.show_smart_recommendations),("Customize workspace",self.customize_workspace),("Workspace overview",self.show_workspace_overview),("Recent actions",self.show_recent_actions),("Toggle focus mode",self.toggle_focus_mode),("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
       favorites={"Open data","Data profile","Workspace overview","New pipeline","New dashboard","New AutoML experiment"}; dialog=QDialog(self); dialog.setWindowTitle("Quick Actions"); dialog.resize(560,500); root=QVBoxLayout(dialog); search=QLineEdit(); search.setPlaceholderText("Search actions... Ctrl+K"); root.addWidget(search); listing=QListWidget(); root.addWidget(listing,1)
       def refresh(text=""):
           listing.clear(); q=text.strip().lower(); ordered=sorted(actions,key=lambda x:(x[0] not in favorites,x[0]))
@@ -2349,6 +2353,8 @@ def predict_batch(request: PredictionRequest):
             "Data contracts": self.show_data_contracts,
             "Data lineage": self.show_data_lineage,
             "Lineage visualization": self.show_lineage_visualization,
+            "Contract test automation": self.show_contract_test_automation,
+            "Export lineage": self.export_lineage_dialog,
           "Open data": self.import_data,
           "Dashboard summary": lambda: self.tabs.setCurrentWidget(next(self.tabs.widget(i) for i in range(self.tabs.count()) if self.tabs.tabText(i)=="Dashboard")),
           "Python Lab": lambda: self.tabs.setCurrentWidget(self.python_page),
@@ -2821,7 +2827,7 @@ def predict_batch(request: PredictionRequest):
       if not path.lower().endswith(".pdw"): path += ".pdw"
       try:
           self.datasets[self.active_dataset] = self.model.dataframe.copy()
-          payload = {"version": "0.32", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter, "ui_preferences": self.ui_preferences, "recent_actions": self.recent_actions, "smart_recommendations": self.smart_recommendations}
+          payload = {"version": "0.33", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter, "ui_preferences": self.ui_preferences, "recent_actions": self.recent_actions, "smart_recommendations": self.smart_recommendations, "contract_test_suites": self.contract_test_suites, "contract_test_runs": self.contract_test_runs}
           with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
           self.current_project_path = str(Path(path).resolve())
           self.statusBar().showMessage(f"Project saved: {path}", 5000)
@@ -2876,6 +2882,8 @@ def predict_batch(request: PredictionRequest):
           self.ui_preferences = payload.get("ui_preferences", self.ui_preferences)
           self.recent_actions = payload.get("recent_actions", [])
           self.smart_recommendations = payload.get("smart_recommendations", [])
+          self.contract_test_suites = payload.get("contract_test_suites", {})
+          self.contract_test_runs = payload.get("contract_test_runs", [])
           self.current_project_path = str(Path(path).resolve())
           self.engine_selector.setCurrentText(self.compute_engine)
           self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
