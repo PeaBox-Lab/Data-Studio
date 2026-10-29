@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.28
+Data Cleaning & Remediation Studio: reviewable cleaning plans, duplicate removal, median/mode imputation, conservative high-missing handling, and Smart Workspace integration.
 ## v0.27
 Data Quality & Profiling Studio: quality scoring, completeness, duplicates, high-missing/constant/high-cardinality column detection, IQR outlier profiling, and Smart Workspace integration.
 ## v0.26
