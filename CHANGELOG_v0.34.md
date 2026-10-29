@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.34
+CI/CD Integration Studio: GitHub Actions and Azure Pipelines templates, Python 3.11/3.12 CI matrix, standalone pipeline quality-gate runner, evidence reports, persisted CI profiles/run history and Ctrl+K export.
 ## v0.33
 Contract Test Automation and Lineage Export: persistent contract suites, automated pass/fail runs, JSON evidence reports, and lineage export to PNG/SVG.
 ## v0.32

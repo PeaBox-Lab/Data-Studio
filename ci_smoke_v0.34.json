@@ -1,0 +1,10 @@
+{
+  "version": "0.34",
+  "status": "PASSED",
+  "checks": [
+    {
+      "status": "PASS",
+      "message": "Static CI runner smoke test"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+trigger: [main]
+pool:
+  vmImage: ubuntu-latest
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.11'
+- script: pip install -r requirements_v0.34.txt
+- script: python -m py_compile python_data_workbench_v0.34.py workbench_headless_v0.34.py
+- script: python pbx_ci_v0.34.py --report ci-report.json
+- publish: ci-report.json
+  artifact: pbx-ci-evidence
+  condition: always()
