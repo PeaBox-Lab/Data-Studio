@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.26
+Workspace Health & Recovery: readiness scoring, project-risk checks, recovery guidance and persisted smart recommendation state.
 ## v0.25
 Smart Workspace: context-aware recommendations, next-best-action guidance, and persistence of workspace preferences/recent actions.
 ## v0.24

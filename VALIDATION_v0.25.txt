@@ -1,7 +1,0 @@
-PBX Data Eng v0.25 validation
-PASS - Desktop compilation
-PASS - Headless compilation
-PASS - Smart Recommendations source present
-PASS - v0.24 feature base retained
-PASS - cumulative changelog included
-PASS - ZIP integrity
