@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.29
+Data Validation & Rules Studio: inferred not-null, uniqueness, numeric-range and categorical-domain expectations with rule-level validation results.
 ## v0.28
 Data Cleaning & Remediation Studio: reviewable cleaning plans, duplicate removal, median/mode imputation, conservative high-missing handling, and Smart Workspace integration.
 ## v0.27
