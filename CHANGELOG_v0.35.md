@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.35
+Release Gate & Repository Automation: integrated readiness gate, persisted gate runs, tag-driven GitHub release workflow, automated packaging and release evidence.
 ## v0.34
 CI/CD Integration Studio: GitHub Actions and Azure Pipelines templates, Python 3.11/3.12 CI matrix, standalone pipeline quality-gate runner, evidence reports, persisted CI profiles/run history and Ctrl+K export.
 ## v0.33

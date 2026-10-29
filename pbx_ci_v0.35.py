@@ -2,9 +2,9 @@ import argparse, json, pickle, sys
 from pathlib import Path
 
 def main():
-    ap=argparse.ArgumentParser(description='PBX Data Eng v0.34 CI quality gate')
+    ap=argparse.ArgumentParser(description='PBX Data Eng v0.35 CI quality gate')
     ap.add_argument('--project'); ap.add_argument('--report',default='ci-report.json'); args=ap.parse_args()
-    result={'version':'0.34','status':'PASSED','checks':[]}
+    result={'version':'0.35','status':'PASSED','checks':[]}
     if args.project:
         p=Path(args.project)
         if not p.exists(): result['checks'].append({'status':'FAIL','message':'Project not found'}); result['status']='FAILED'
