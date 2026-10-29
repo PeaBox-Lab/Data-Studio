@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.30
+Data Contracts & Governance Studio: generated schema contracts, nullability/dtype expectations, learned validation rules, conformance reporting, ownership/versioning foundation and governance workflow.
 ## v0.29
 Data Validation & Rules Studio: inferred not-null, uniqueness, numeric-range and categorical-domain expectations with rule-level validation results.
 ## v0.28

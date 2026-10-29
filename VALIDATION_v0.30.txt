@@ -1,0 +1,10 @@
+PBX Data Eng v0.30 validation
+PASS - Desktop compilation
+PASS - Headless compilation
+PASS - v0.29 validation/rules retained
+PASS - data-contract generation implemented
+PASS - schema/type/nullability conformance implemented
+PASS - learned validation rules linked to contracts
+PASS - Ctrl+K/tool routing integration implemented
+PASS - project payload version 0.30
+PASS - cumulative changelog and release notes included
