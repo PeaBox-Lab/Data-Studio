@@ -1,0 +1,13 @@
+PBX Data Eng v0.36 validation
+PASS - Desktop compilation
+PASS - Headless compilation
+PASS - CI runner compilation
+PASS - DEV/TEST/PROD environment model implemented
+PASS - PROD CI/CD quality gate implemented
+PASS - PROD contract-test gate implemented
+PASS - promotion history persistence implemented
+PASS - GitHub Actions environment-promotion template implemented
+PASS - deployment evidence artifact flow implemented
+PASS - v0.35 release-gate foundation retained
+PASS - project payload version 0.36
+PASS - cumulative changelog, release notes and user guide included

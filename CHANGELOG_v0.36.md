@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.36
+Environment Promotion & Deployment Governance: DEV/TEST/PROD model, guarded PROD promotion, persistent promotion evidence, protected-environment foundation and GitHub Actions deployment workflow export.
 ## v0.35
 Release Gate & Repository Automation: integrated readiness gate, persisted gate runs, tag-driven GitHub release workflow, automated packaging and release evidence.
 ## v0.34

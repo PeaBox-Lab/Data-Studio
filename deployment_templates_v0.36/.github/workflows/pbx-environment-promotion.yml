@@ -1,0 +1,30 @@
+name: PBX Environment Promotion
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [TEST, PROD]
+        required: true
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements_v0.36.txt
+      - run: python -m py_compile python_data_workbench_v0.36.py workbench_headless_v0.36.py
+      - run: python pbx_ci_v0.36.py --report deployment-evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployment-evidence
+          path: deployment-evidence.json
+  deploy:
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: echo "Promotion gate passed for ${{ inputs.environment }}"
