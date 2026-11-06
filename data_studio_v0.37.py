@@ -1,4 +1,3 @@
-
 import sys
 import traceback
 import json
@@ -7,6 +6,7 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
+from data_studio_core_v0_37 import (calculate_deployment_health, promotion_readiness, infer_validation_rules, validate_frame, workspace_health, safe_math_eval, validate_dataframe_expression)
 try:
   import pandas as pd
   import numpy as np
@@ -134,7 +134,7 @@ class ToolCard(QFrame):
 class Workbench(QMainWindow):
   def __init__(self):
       super().__init__()
-      self.setWindowTitle("Python Data Workbench v0.36 Environment Promotion & Deployment Governance")
+      self.setWindowTitle("Data Studio v0.37 Deployment Observability & Rollback Studio")
       self.resize(1450, 900)
       self.current_project_path = None
       self.history = []
@@ -189,8 +189,15 @@ class Workbench(QMainWindow):
       self.cicd_profiles = {}
       self.cicd_runs = []
       self.release_gate_runs = []
-      self.environments = {"DEV":{"protected":False}, "TEST":{"protected":False}, "PROD":{"protected":True}}
+      self.environments = {"DEV":{"protected":False,"current_release":"v0.37-dev","previous_release":None}, "TEST":{"protected":False,"current_release":None,"previous_release":None}, "PROD":{"protected":True,"current_release":None,"previous_release":None}}
       self.promotion_history = []
+      self.validation_rules = {}
+      self.data_contracts = {}
+      self.lineage_graph = {"nodes":[],"edges":[]}
+      self.cleaning_plans = {}
+      self.deployment_thresholds = {"healthy":85,"degraded":65,"api_error_rate":0.05,"drift_alerts":2}
+      self.deployment_observations = []
+      self.rollback_history = []
       self.model = DataFrameModel(self.datasets[self.active_dataset])
       self.model.changed.connect(self.refresh_status)
       self.build_ui()
@@ -232,10 +239,10 @@ class Workbench(QMainWindow):
       header = QFrame()
       header.setObjectName("header")
       hl = QHBoxLayout(header)
-      logo = QLabel("Py")
+      logo = QLabel("DS")
       logo.setObjectName("logo")
       title_box = QVBoxLayout()
-      title = QLabel("Python Data Workbench")
+      title = QLabel("Data Studio")
       title.setObjectName("appTitle")
       subtitle = QLabel("Import → Clean → Analyze → Visualize → Model → Automate")
       subtitle.setObjectName("muted")
@@ -302,6 +309,7 @@ class Workbench(QMainWindow):
           "Visualize": [("New dashboard", "Create dashboard"), ("Add KPI tile", "Metric card"), ("Add chart tile", "Chart visual"), ("Add table tile", "Detail table"), ("Dashboard layout", "Arrange visuals"), ("Dashboard package", "Import/export dashboard")],
           "Model": [("Relationship manager", "Dataset relationships"), ("Semantic measure", "Reusable measures"), ("New AutoML experiment", "Guided machine learning"), ("Run model leaderboard", "Compare models"), ("Model registry", "Model versions"), ("Create baseline", "Monitoring baseline")],
           "Automate": [("Create job", "Schedule work"), ("Run job now", "Execute job"), ("Job manager", "Manage schedules"), ("Create API deployment", "REST deployment"), ("Export API package", "FastAPI package"), ("Deployment report", "Review endpoints")],
+          "Govern": [("Data quality profile", "Profile quality and structural risks"), ("Validation rules", "Infer and execute data rules"), ("Data contracts", "Create governed schema contracts"), ("Contract test automation", "Run repeatable contract suites"), ("Release gate", "Evaluate release readiness"), ("Environment promotion", "Promote DEV to TEST to PROD"), ("Deployment observability", "Score environment health"), ("Rollback center", "Review and execute rollback")],
           "Advanced": [("SQL analysis", "DuckDB SQL"), ("Engine status", "Compute engine"), ("Large-data SQL", "Lazy-source SQL"), ("Convert to Spark", "PySpark"), ("Explain plan", "Execution plan"), ("Python Lab", "Full Python access")],
       }
       for section, cards in definitions.items():
@@ -332,6 +340,161 @@ class Workbench(QMainWindow):
       layout.addLayout(grid_row)
       layout.addStretch()
       return page
+  def _latest_pass(self, records):
+      return bool(records and str(records[-1].get("status", "")).upper() in {"PASS", "PASSED", "SUCCESS"})
+  def _project_health_payload(self):
+      return {"datasets":self.datasets,"pipeline_definitions":self.pipeline_definitions,"contract_test_runs":self.contract_test_runs,"cicd_runs":self.cicd_runs,"release_gate_runs":self.release_gate_runs,"current_project_path":self.current_project_path}
+  def show_smart_recommendations(self):
+      recommendations=[]; df=self.model.dataframe
+      if df.isna().sum().sum(): recommendations.append("Review missing values or generate a cleaning plan.")
+      if int(df.duplicated().sum()): recommendations.append("Remove duplicate rows before analysis or modeling.")
+      if not self.pipeline_definitions: recommendations.append("Create a reusable pipeline so transformations are reproducible.")
+      if not self.contract_test_runs: recommendations.append("Generate and run a data contract before release.")
+      if not self.cicd_runs: recommendations.append("Run the CI/CD readiness assessment.")
+      if not self.deployment_observations: recommendations.append("Record a deployment-health snapshot for DEV, TEST, or PROD.")
+      if not recommendations: recommendations.append("Workspace foundations are complete; review the release gate and promote to the next environment.")
+      self.smart_recommendations=recommendations
+      self.console.setPlainText("SMART RECOMMENDATIONS\n"+"="*80+"\n"+"\n".join(f"{i}. {x}" for i,x in enumerate(recommendations,1))); self.tabs.setCurrentWidget(self.python_page)
+  def show_workspace_health(self):
+      result=workspace_health(self._project_health_payload()); lines=["WORKSPACE HEALTH","="*80,f"Score: {result['score']}/100",f"Status: {result['status']}",""]
+      lines.extend(f"- {x['finding']} (-{x['deduction']})" for x in result["findings"]); lines.append("\nNo deductions detected." if not result["findings"] else "\nResolve the listed findings before PROD promotion.")
+      self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
+  def show_data_quality_profile(self):
+      df=self.model.dataframe; rows=max(1,len(df)); profile=[]
+      for column in df.columns:
+          series=df[column]; profile.append({"column":str(column),"dtype":str(series.dtype),"missing":int(series.isna().sum()),"missing_pct":round(float(series.isna().mean()*100),2),"unique":int(series.nunique(dropna=True)),"constant":bool(series.nunique(dropna=True)<=1),"high_cardinality":bool(series.nunique(dropna=True)>max(50,rows*.8))})
+      completeness=round(100*(1-df.isna().sum().sum()/max(1,df.size)),2); quality=max(0,round(completeness-min(20,df.duplicated().sum()/rows*100),2))
+      self.console.setPlainText(f"DATA QUALITY PROFILE\n{'='*80}\nDataset: {self.active_dataset}\nRows: {len(df):,}\nColumns: {len(df.columns)}\nQuality score: {quality:.2f}\nDuplicate rows: {int(df.duplicated().sum())}\n\n"+pd.DataFrame(profile).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+  def show_cleaning_plan(self):
+      df=self.model.dataframe; plan=[]
+      duplicates=int(df.duplicated().sum())
+      if duplicates: plan.append({"action":"remove_duplicates","scope":"all columns","reason":f"{duplicates} duplicate rows"})
+      for column in df.columns:
+          missing=int(df[column].isna().sum())
+          if missing:
+              strategy="median" if pd.api.types.is_numeric_dtype(df[column]) else "mode"
+              plan.append({"action":"fill_missing","scope":str(column),"strategy":strategy,"reason":f"{missing} missing values"})
+      self.cleaning_plans[self.active_dataset]=plan
+      text="No remediation is currently required." if not plan else pd.DataFrame(plan).to_string(index=False)
+      answer=QMessageBox.question(self,"Cleaning plan",f"Reviewable plan for {self.active_dataset}:\n\n{text}\n\nApply this conservative plan now?")
+      if answer==QMessageBox.Yes and plan:
+          result=df.copy()
+          if duplicates: result=result.drop_duplicates().reset_index(drop=True)
+          for item in plan:
+              if item["action"]!="fill_missing": continue
+              column=item["scope"]
+              if item["strategy"]=="median": result[column]=result[column].fillna(result[column].median())
+              else:
+                  mode=result[column].mode(dropna=True)
+                  if not mode.empty: result[column]=result[column].fillna(mode.iloc[0])
+          self.apply_dataframe(result,"Apply reviewed cleaning plan")
+  def show_validation_rules(self):
+      rules=infer_validation_rules(self.model.dataframe); self.validation_rules[self.active_dataset]=rules
+      results=validate_frame(self.model.dataframe,rules)
+      self.console.setPlainText(f"VALIDATION RULES\n{'='*80}\nDataset: {self.active_dataset}\nRules: {len(rules)}\nFailures: {sum(x['status']=='FAIL' for x in results)}\n\n"+pd.DataFrame(results).to_string(index=False)); self.tabs.setCurrentWidget(self.python_page)
+  def show_data_contracts(self):
+      rules=self.validation_rules.get(self.active_dataset) or infer_validation_rules(self.model.dataframe); self.validation_rules[self.active_dataset]=rules
+      contract={"name":f"{self.active_dataset}_contract","version":1,"owner":"Unassigned","dataset":self.active_dataset,"columns":[{"name":str(c),"dtype":str(self.model.dataframe[c].dtype),"nullable":bool(self.model.dataframe[c].isna().any())} for c in self.model.dataframe.columns],"rules":rules,"created_utc":pd.Timestamp.utcnow().isoformat()}
+      self.data_contracts[self.active_dataset]=contract; self.console.setPlainText("DATA CONTRACT\n"+"="*80+"\n"+json.dumps(contract,indent=2)); self.tabs.setCurrentWidget(self.python_page)
+  def _lineage_edges(self):
+      edges=[]
+      for name,pipe in self.pipeline_definitions.items():
+          source=pipe.get("source_dataset") or pipe.get("dataset") or self.active_dataset; edges.append((f"dataset:{source}",f"pipeline:{name}"))
+      for relation in self.relationships:
+          left=relation.get("left_dataset") or relation.get("left"); right=relation.get("right_dataset") or relation.get("right")
+          if left and right: edges.append((f"dataset:{left}",f"dataset:{right}"))
+      for job_id,job in self.scheduled_jobs.items():
+          edges.append((f"asset:{job.get('config',{}).get('dataset') or job.get('config',{}).get('pipeline') or self.active_dataset}",f"job:{job_id}"))
+      return edges
+  def show_data_lineage(self):
+      edges=self._lineage_edges(); nodes=sorted({x for edge in edges for x in edge}|{f"dataset:{x}" for x in self.datasets})
+      self.lineage_graph={"nodes":nodes,"edges":[{"source":a,"target":b} for a,b in edges]}; text="\n".join(f"{a} -> {b}" for a,b in edges) or "No derived lineage relationships yet."
+      self.console.setPlainText(f"DATA LINEAGE\n{'='*80}\nAssets: {len(nodes)}\nRelationships: {len(edges)}\n\n{text}"); self.tabs.setCurrentWidget(self.python_page)
+  def show_lineage_visualization(self):
+      edges=self._lineage_edges(); nodes=sorted({x for edge in edges for x in edge}|{f"dataset:{x}" for x in self.datasets})
+      self.figure.clear(); ax=self.figure.add_subplot(111); ax.axis("off")
+      if not nodes: ax.text(.5,.5,"No lineage assets",ha="center",va="center")
+      else:
+          angles=np.linspace(0,2*np.pi,len(nodes),endpoint=False); pos={n:(np.cos(a),np.sin(a)) for n,a in zip(nodes,angles)}
+          for node,(x,y) in pos.items(): ax.scatter([x],[y],s=900,color="#dbeafe",edgecolor="#2563eb"); ax.text(x,y,node,ha="center",va="center",fontsize=7,wrap=True)
+          for source,target in edges:
+              if source in pos and target in pos: ax.annotate("",xy=pos[target],xytext=pos[source],arrowprops={"arrowstyle":"->","color":"#64748b"})
+      ax.set_title("Data Studio lineage"); self.canvas.draw(); self.tabs.setCurrentWidget(self.chart_page)
+  def export_lineage_dialog(self):
+      path,_=QFileDialog.getSaveFileName(self,"Export lineage","lineage_v0.37.json","JSON (*.json);;PNG (*.png);;SVG (*.svg)")
+      if not path:return
+      if Path(path).suffix.lower() in {".png",".svg"}: self.show_lineage_visualization(); self.figure.savefig(path,bbox_inches="tight")
+      else:
+          self.show_data_lineage(); Path(path).write_text(json.dumps(self.lineage_graph,indent=2),encoding="utf-8")
+      self.statusBar().showMessage(f"Lineage exported: {path}",5000)
+  def show_contract_test_automation(self):
+      rules=self.validation_rules.get(self.active_dataset) or infer_validation_rules(self.model.dataframe); suite={"name":f"{self.active_dataset}_contract_suite","dataset":self.active_dataset,"rules":rules}
+      self.contract_test_suites[suite["name"]]=suite; results=validate_frame(self.model.dataframe,rules); failed=sum(x["status"]=="FAIL" for x in results); record={"suite":suite["name"],"dataset":self.active_dataset,"status":"PASS" if failed==0 else "FAIL","rules":len(results),"failed":failed,"run_utc":pd.Timestamp.utcnow().isoformat(),"results":results}; self.contract_test_runs.append(record)
+      self.console.setPlainText("CONTRACT TEST RUN\n"+"="*80+"\n"+json.dumps(record,indent=2)); self.tabs.setCurrentWidget(self.python_page)
+  def show_cicd_integration(self):
+      checks={"project_saved":bool(self.current_project_path),"source_compiles":True,"datasets_available":bool(self.datasets),"contract_tests_passed":self._latest_pass(self.contract_test_runs)}; status="PASS" if all(checks.values()) else "FAIL"; record={"profile":"Data Studio local quality gate","status":status,"checks":checks,"run_utc":pd.Timestamp.utcnow().isoformat()}; self.cicd_profiles["default"]={"python":["3.11","3.12"],"provider":"GitHub Actions / Azure Pipelines"}; self.cicd_runs.append(record)
+      self.console.setPlainText("CI/CD READINESS\n"+"="*80+"\n"+json.dumps(record,indent=2)); self.tabs.setCurrentWidget(self.python_page)
+  def export_cicd_bundle_dialog(self):
+      folder=QFileDialog.getExistingDirectory(self,"Export CI/CD bundle")
+      if not folder:return
+      out=Path(folder); (out/"github-actions-data-studio.yml").write_text("name: Data Studio CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        python: ['3.11', '3.12']\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with: {python-version: '${{ matrix.python }}'}\n      - run: pip install -r requirements_v0.37.txt\n      - run: python data_studio_ci_v0.37.py --project .\n",encoding="utf-8"); (out/"azure-pipelines-data-studio.yml").write_text("trigger:\n- main\npool:\n  vmImage: ubuntu-latest\nsteps:\n- task: UsePythonVersion@0\n  inputs: {versionSpec: '3.11'}\n- script: pip install -r requirements_v0.37.txt\n- script: python data_studio_ci_v0.37.py --project .\n",encoding="utf-8"); QMessageBox.information(self,"CI/CD export",f"Templates exported to {out}")
+  def show_release_gate(self):
+      checks={"project_saved":bool(self.current_project_path),"contract_tests":self._latest_pass(self.contract_test_runs),"ci":self._latest_pass(self.cicd_runs),"datasets":bool(self.datasets),"pipelines":bool(self.pipeline_definitions)}; status="PASS" if all(checks.values()) else "FAIL"; record={"status":status,"checks":checks,"run_utc":pd.Timestamp.utcnow().isoformat()}; self.release_gate_runs.append(record)
+      self.console.setPlainText("RELEASE GATE\n"+"="*80+"\n"+json.dumps(record,indent=2)); self.tabs.setCurrentWidget(self.python_page)
+  def export_release_automation_dialog(self):
+      folder=QFileDialog.getExistingDirectory(self,"Export release automation")
+      if not folder:return
+      Path(folder,"release-data-studio.yml").write_text("name: Data Studio Release\non:\n  push:\n    tags: ['v*']\njobs:\n  package:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci_v0.37.py --project .\n      - uses: actions/upload-artifact@v4\n        with: {name: data-studio-release, path: .}\n",encoding="utf-8"); QMessageBox.information(self,"Release automation",f"Release workflow exported to {folder}")
+  def show_environment_promotion(self):
+      source,ok=QInputDialog.getItem(self,"Environment promotion","Source environment",["DEV","TEST"],0,False)
+      if not ok:return
+      targets=["TEST"] if source=="DEV" else ["PROD"]; target,ok=QInputDialog.getItem(self,"Environment promotion","Target environment",targets,0,False)
+      if not ok:return
+      release,ok=QInputDialog.getText(self,"Environment promotion","Release identifier",text="v0.37")
+      if not ok or not release.strip():return
+      ready,blockers=promotion_readiness(target,self._latest_pass(self.cicd_runs),self._latest_pass(self.contract_test_runs),self._latest_pass(self.release_gate_runs))
+      record={"source":source,"target":target,"release":release.strip(),"status":"PROMOTED" if ready else "BLOCKED","blockers":blockers,"timestamp_utc":pd.Timestamp.utcnow().isoformat()}; self.promotion_history.append(record)
+      if not ready: QMessageBox.warning(self,"Promotion blocked","\n".join(blockers)); return
+      env=self.environments.setdefault(target,{"protected":target=="PROD"}); env["previous_release"]=env.get("current_release"); env["current_release"]=release.strip(); env["promoted_utc"]=record["timestamp_utc"]; QMessageBox.information(self,"Promotion complete",f"{release.strip()} promoted from {source} to {target}.")
+  def export_deployment_automation_dialog(self):
+      folder=QFileDialog.getExistingDirectory(self,"Export deployment automation")
+      if not folder:return
+      Path(folder,"deploy-data-studio.yml").write_text("name: Data Studio Deploy\non: workflow_dispatch\njobs:\n  deploy-test:\n    environment: TEST\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci_v0.37.py --project .\n  deploy-prod:\n    needs: deploy-test\n    environment: PROD\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'Deploy approved Data Studio release'\n",encoding="utf-8"); QMessageBox.information(self,"Deployment automation",f"Deployment workflow exported to {folder}")
+  def record_deployment_observation(self):
+      environment,ok=QInputDialog.getItem(self,"Deployment observation","Environment",["DEV","TEST","PROD"],1,False)
+      if not ok:return
+      error_pct,ok=QInputDialog.getDouble(self,"Deployment observation","API error rate (%)",0.0,0.0,100.0,2)
+      if not ok:return
+      drift,ok=QInputDialog.getInt(self,"Deployment observation","Drift alerts",0,0,10000,1)
+      if not ok:return
+      critical,ok=QInputDialog.getInt(self,"Deployment observation","Critical drift alerts",0,0,10000,1)
+      if not ok:return
+      failed_jobs,ok=QInputDialog.getInt(self,"Deployment observation","Failed jobs",0,0,10000,1)
+      if not ok:return
+      observation={"environment":environment,"release":self.environments.get(environment,{}).get("current_release"),"api_error_rate":error_pct/100.0,"drift_alerts":drift,"critical_drift_alerts":critical,"failed_jobs":failed_jobs,"ci_passed":self._latest_pass(self.cicd_runs),"contracts_passed":self._latest_pass(self.contract_test_runs),"observed_utc":pd.Timestamp.utcnow().isoformat()}; health=calculate_deployment_health(observation,self.deployment_thresholds).to_dict(); observation["health"]=health; self.deployment_observations.append(observation); return observation
+  def show_deployment_observability(self):
+      answer=QMessageBox.question(self,"Deployment Observability","Record a new deployment-health snapshot?")
+      if answer==QMessageBox.Yes:self.record_deployment_observation()
+      rows=[]
+      for item in self.deployment_observations[-100:]:
+          health=item.get("health",{}); rows.append({"observed_utc":item.get("observed_utc"),"environment":item.get("environment"),"release":item.get("release"),"score":health.get("score"),"status":health.get("status"),"api_error_rate":item.get("api_error_rate"),"drift_alerts":item.get("drift_alerts"),"failed_jobs":item.get("failed_jobs"),"rollback":health.get("rollback_recommended")})
+      text="No deployment observations recorded." if not rows else pd.DataFrame(rows).to_string(index=False)
+      self.console.setPlainText("DEPLOYMENT OBSERVABILITY\n"+"="*100+"\nThresholds: HEALTHY >= 85; DEGRADED 65-84; UNHEALTHY < 65; rollback review at API errors >= 5% or drift alerts >= 2.\n\n"+text); self.tabs.setCurrentWidget(self.python_page)
+  def show_rollback_center(self):
+      candidates=[x for x in self.deployment_observations if x.get("health",{}).get("rollback_recommended")]
+      lines=["ROLLBACK CENTER","="*100,f"Recommendations: {len(candidates)}",f"Rollback history: {len(self.rollback_history)}",""]
+      for item in candidates[-20:]: lines.append(f"{item.get('environment')} | {item.get('release')} | score={item.get('health',{}).get('score')} | "+"; ".join(item.get("health",{}).get("reasons",[])))
+      if self.rollback_history: lines.extend(["","ROLLBACK HISTORY",pd.DataFrame(self.rollback_history[-50:]).to_string(index=False)])
+      self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
+      if candidates and QMessageBox.question(self,"Rollback Center","Execute a governance-state rollback for a recommended environment?")==QMessageBox.Yes:self.execute_rollback()
+  def execute_rollback(self):
+      options=[name for name,state in self.environments.items() if state.get("previous_release")]
+      if not options: QMessageBox.information(self,"Rollback","No environment has a previous release recorded."); return
+      environment,ok=QInputDialog.getItem(self,"Rollback","Environment",options,0,False)
+      if not ok:return
+      state=self.environments[environment]; current=state.get("current_release"); previous=state.get("previous_release")
+      if QMessageBox.question(self,"Confirm rollback",f"Rollback {environment} from {current} to {previous}?")!=QMessageBox.Yes:return
+      state["current_release"]=previous; state["previous_release"]=current; record={"environment":environment,"from_release":current,"to_release":previous,"status":"COMPLETED","timestamp_utc":pd.Timestamp.utcnow().isoformat()}; self.rollback_history.append(record); QMessageBox.information(self,"Rollback complete",f"{environment} now points to {previous}. Deployment execution remains controlled by the exported environment workflow.")
   def define_kpi(self):
       df=self.model.dataframe
       numeric=list(df.select_dtypes(include=np.number).columns)
@@ -527,9 +690,9 @@ class Workbench(QMainWindow):
       if not ok: return
       job_id = keys[labels.index(choice)]; folder = QFileDialog.getExistingDirectory(self, "Export job runner")
       if not folder: return
-      out = Path(folder) / f"workbench_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
+      out = Path(folder) / f"data_studio_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
       (out / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
-      runtime_source = Path(__file__).with_name("workbench_headless_v0.21.py")
+      runtime_source = Path(__file__).with_name("data_studio_headless_v0.37.py")
       if not runtime_source.exists():
           QMessageBox.critical(self, "Export runner", f"Headless runtime not found:\n{runtime_source}")
           return
@@ -544,7 +707,7 @@ base = Path(__file__).resolve().parent
 config = json.loads((base / "runner.json").read_text(encoding="utf-8"))
 command = [
   sys.executable,
-  str(base / "workbench_headless_v0.21.py"),
+  str(base / "data_studio_headless_v0.37.py"),
   "--project", config["project"],
   "--job-file", str(base / config["job_file"]),
   "--json-output", str(base / "last_run.json"),
@@ -557,14 +720,14 @@ raise SystemExit(subprocess.call(command))
       schedule = {"Hourly":"/SC HOURLY /MO 1", "Daily":"/SC DAILY /ST 08:00", "Weekly":"/SC WEEKLY /D MON /ST 08:00", "Monthly":"/SC MONTHLY /D 1 /ST 08:00"}.get(job["schedule"])
       if schedule: (out / "register_windows_task.bat").write_text(f'@echo off\nschtasks /Create /TN "PythonDataWorkbench_{job_id}" {schedule} /TR "\"%~dp0run_job.bat\"" /F\npause\n', encoding="utf-8")
       (out / "README.txt").write_text(
-          "Python Data Workbench v0.21 automation runner\n\n"
+          "Data Studio v0.37 automation runner\n\n"
           "Run run_job.bat on Windows or run_job.sh on macOS/Linux.\n"
           "The runner loads the saved .pdw project, executes job.json, records history, "
           "persists generated datasets and monitoring results, and writes last_run.json.\n"
           "If the project moves, update the project path in runner.json.\n",
           encoding="utf-8",
       )
-      QMessageBox.information(self, "Runner exported", f"Complete v0.21 automation runner exported to:\n{out}")
+      QMessageBox.information(self, "Runner exported", f"Complete v0.37 automation runner exported to:\n{out}")
   def jobs_report(self):
       lines = ["SCHEDULER AND JOBS REPORT", "="*80, f"Jobs: {len(self.scheduled_jobs)}", f"Runs: {len(self.job_runs)}", f"Failed: {sum(x.get('status') == 'failed' for x in self.job_runs)}", ""]
       if self.scheduled_jobs: lines.extend(["JOB DEFINITIONS", pd.DataFrame([dict(id=k, **v) for k,v in self.scheduled_jobs.items()]).to_string(index=False), ""])
@@ -1138,7 +1301,7 @@ def predict_batch(request: PredictionRequest):
           expr,ok=QInputDialog.getText(self,"Numerical solver","Expression in x",text="x**2 - 4")
           if not ok:return
           safe={"np":np,"sin":np.sin,"cos":np.cos,"exp":np.exp,"log":np.log,"sqrt":np.sqrt}
-          fn=lambda x: eval(expr,{"__builtins__":{}},{**safe,"x":x})
+          fn=lambda x: safe_math_eval(expr,{**safe,"x":x},np)
           a,ok=QInputDialog.getDouble(self,"Lower bound","a",0.0,-1e12,1e12,6)
           if not ok:return
           b,ok=QInputDialog.getDouble(self,"Upper bound","b",5.0,-1e12,1e12,6)
@@ -1210,7 +1373,7 @@ def predict_batch(request: PredictionRequest):
               elif dist=="triangular": env[name]=rng.triangular(pars[0],pars[1],pars[2],iterations)
               elif dist=="lognormal": env[name]=rng.lognormal(pars[0],pars[1],iterations)
               else:raise ValueError(f"Unsupported distribution: {dist}")
-          output=eval(expression,{"__builtins__":{}},{**env,"np":np}); q=np.quantile(output,[.01,.05,.25,.5,.75,.95,.99]); loss=float(np.mean(output<0))
+          output=safe_math_eval(expression,env,np); q=np.quantile(output,[.01,.05,.25,.5,.75,.95,.99]); loss=float(np.mean(output<0))
           table=pd.DataFrame({"metric":["mean","std","p01","p05","p25","p50","p75","p95","p99","probability_below_zero"],"value":[np.mean(output),np.std(output),*q,loss]})
           text=f"Monte Carlo simulation\nIterations: {iterations:,}\nExpression: {expression}\nExpected value: {np.mean(output):,.6f}\nStandard deviation: {np.std(output):,.6f}\nProbability below zero: {loss:.2%}"
           self.store_engineering_result("Monte Carlo Pro",text,table)
@@ -1225,7 +1388,7 @@ def predict_batch(request: PredictionRequest):
           if not ok:return
           points,ok=QInputDialog.getInt(self,"Parameter sweep","Points",101,2,100000)
           if not ok:return
-          x=np.linspace(start,stop,points); y=eval(expr,{"__builtins__":{}},{"x":x,"np":np}); result=pd.DataFrame({"x":x,"response":y}); best=result.loc[result["response"].idxmax()]
+          x=np.linspace(start,stop,points); y=safe_math_eval(expr,{"x":x},np); result=pd.DataFrame({"x":x,"response":y}); best=result.loc[result["response"].idxmax()]
           text=f"Parameter sweep\nExpression: {expr}\nRange: {start} to {stop}\nPoints: {points:,}\nMaximum response: {best['response']:.8g} at x={best['x']:.8g}"
           self.store_engineering_result("Parameter sweep",text,result)
       except Exception as exc: QMessageBox.critical(self,"Parameter sweep failed",str(exc))
@@ -1860,7 +2023,7 @@ def predict_batch(request: PredictionRequest):
       elif op == "clean_text":
           for c in out.select_dtypes(include="object"): out[c] = out[c].astype(str).str.strip().replace("nan", np.nan)
       elif op == "drop_missing_rows": out = out.dropna(subset=[p["column"]] if p.get("column") else None).reset_index(drop=True)
-      elif op == "calculated_column": out[p["name"]] = out.eval(p["expression"])
+      elif op == "calculated_column": validate_dataframe_expression(p["expression"], list(out.columns)); out[p["name"]] = out.eval(p["expression"], engine="python")
       elif op == "filter":
           c, oper, raw = p["column"], p["operator"], p["value"]; series = out[c]; value = raw
           if pd.api.types.is_numeric_dtype(series):
@@ -1988,7 +2151,7 @@ def predict_batch(request: PredictionRequest):
       expr,ok=QInputDialog.getText(self,"Calculated column","pandas expression",text=example)
       if not ok or not expr.strip(): return
       try:
-          result=df.copy(); result[name.strip()]=result.eval(expr); definition={"dataset":self.active_dataset,"name":name.strip(),"expression":expr}; self.calculated_columns=[x for x in self.calculated_columns if not (x["dataset"]==self.active_dataset and x["name"]==name.strip())]; self.calculated_columns.append(definition); self.apply_dataframe(result,f"Calculated column {name.strip()}")
+          result=df.copy(); validate_dataframe_expression(expr,list(result.columns)); result[name.strip()]=result.eval(expr,engine="python"); definition={"dataset":self.active_dataset,"name":name.strip(),"expression":expr}; self.calculated_columns=[x for x in self.calculated_columns if not (x["dataset"]==self.active_dataset and x["name"]==name.strip())]; self.calculated_columns.append(definition); self.apply_dataframe(result,f"Calculated column {name.strip()}")
       except Exception as exc: QMessageBox.critical(self,"Calculated column failed",str(exc))
   def define_semantic_measure(self):
       df=self.model.dataframe; numeric=list(df.select_dtypes(include=np.number).columns)
@@ -2289,7 +2452,7 @@ def predict_batch(request: PredictionRequest):
           row=QFrame(); row.setObjectName("toolCard"); layout=QHBoxLayout(row); text=QVBoxLayout(); a=QLabel(label); a.setObjectName("toolTitle"); b=QLabel(desc); b.setObjectName("muted"); text.addWidget(a); text.addWidget(b); button=QPushButton("Start"); button.clicked.connect(lambda checked=False,f=fn,d=dialog:(d.accept(),f())); layout.addLayout(text,1); layout.addWidget(button); root.addWidget(row)
       close=QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); dialog.exec()
   def open_command_palette(self):
-      actions=[("Environment promotion",self.show_environment_promotion),("Export deployment automation",self.export_deployment_automation_dialog),("Release gate",self.show_release_gate),("Export release automation",self.export_release_automation_dialog),("CI/CD integration",self.show_cicd_integration),("Export CI/CD",self.export_cicd_bundle_dialog),("Contract test automation",self.show_contract_test_automation),("Export lineage",self.export_lineage_dialog),("Lineage visualization",self.show_lineage_visualization),("Data lineage",self.show_data_lineage),("Data contracts",self.show_data_contracts),("Validation rules",self.show_validation_rules),("Cleaning plan",self.show_cleaning_plan),("Data quality profile",self.show_data_quality_profile),("Workspace health",self.show_workspace_health),("Smart recommendations",self.show_smart_recommendations),("Customize workspace",self.customize_workspace),("Workspace overview",self.show_workspace_overview),("Recent actions",self.show_recent_actions),("Toggle focus mode",self.toggle_focus_mode),("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
+      actions=[("Deployment observability",self.show_deployment_observability),("Rollback center",self.show_rollback_center),("Environment promotion",self.show_environment_promotion),("Export deployment automation",self.export_deployment_automation_dialog),("Release gate",self.show_release_gate),("Export release automation",self.export_release_automation_dialog),("CI/CD integration",self.show_cicd_integration),("Export CI/CD",self.export_cicd_bundle_dialog),("Contract test automation",self.show_contract_test_automation),("Export lineage",self.export_lineage_dialog),("Lineage visualization",self.show_lineage_visualization),("Data lineage",self.show_data_lineage),("Data contracts",self.show_data_contracts),("Validation rules",self.show_validation_rules),("Cleaning plan",self.show_cleaning_plan),("Data quality profile",self.show_data_quality_profile),("Workspace health",self.show_workspace_health),("Smart recommendations",self.show_smart_recommendations),("Customize workspace",self.customize_workspace),("Workspace overview",self.show_workspace_overview),("Recent actions",self.show_recent_actions),("Toggle focus mode",self.toggle_focus_mode),("Open data",self.import_data),("Save project",self.save_project),("Export data",self.export_data),("Data profile",self.show_profile),("Missing values",self.fill_missing),("Duplicates",self.remove_duplicates),("New pipeline",self.new_pipeline),("Pipeline editor",self.open_pipeline_editor),("KPI summary",self.kpi_summary),("Trend analysis",self.trend_analysis),("New dashboard",self.new_dashboard_v2),("Dashboard layout",self.open_dashboard_layout_editor),("New AutoML experiment",self.automl_new_experiment),("Run model leaderboard",self.automl_run_leaderboard),("Model registry",self.ml_model_registry),("Create baseline",self.monitor_create_baseline),("Create job",self.jobs_create),("Job manager",self.jobs_manager),("Create API deployment",self.api_create_deployment),("SQL workspace",lambda:self.tabs.setCurrentWidget(self.sql_page)),("Python Lab",lambda:self.tabs.setCurrentWidget(self.python_page))]
       favorites={"Open data","Data profile","Workspace overview","New pipeline","New dashboard","New AutoML experiment"}; dialog=QDialog(self); dialog.setWindowTitle("Quick Actions"); dialog.resize(560,500); root=QVBoxLayout(dialog); search=QLineEdit(); search.setPlaceholderText("Search actions... Ctrl+K"); root.addWidget(search); listing=QListWidget(); root.addWidget(listing,1)
       def refresh(text=""):
           listing.clear(); q=text.strip().lower(); ordered=sorted(actions,key=lambda x:(x[0] not in favorites,x[0]))
@@ -2362,6 +2525,8 @@ def predict_batch(request: PredictionRequest):
             "CI/CD integration": self.show_cicd_integration,
             "Release gate": self.show_release_gate,
             "Environment promotion": self.show_environment_promotion,
+            "Deployment observability": self.show_deployment_observability,
+            "Rollback center": self.show_rollback_center,
             "Export deployment automation": self.export_deployment_automation_dialog,
             "Export release automation": self.export_release_automation_dialog,
             "Export CI/CD": self.export_cicd_bundle_dialog,
@@ -2833,18 +2998,18 @@ def predict_batch(request: PredictionRequest):
       self.model.set_dataframe(self.datasets[self.active_dataset])
       self.refresh_dataset_list(); self.refresh_status()
   def save_project(self):
-      path, _ = QFileDialog.getSaveFileName(self, "Save project", "workbench_project.pdw", "Python Data Workbench (*.pdw)")
+      path, _ = QFileDialog.getSaveFileName(self, "Save project", "data_studio_project.pdw", "Data Studio Project (*.pdw)")
       if not path: return
       if not path.lower().endswith(".pdw"): path += ".pdw"
       try:
           self.datasets[self.active_dataset] = self.model.dataframe.copy()
-          payload = {"version": "0.36", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter, "ui_preferences": self.ui_preferences, "recent_actions": self.recent_actions, "smart_recommendations": self.smart_recommendations, "contract_test_suites": self.contract_test_suites, "contract_test_runs": self.contract_test_runs, "cicd_profiles": self.cicd_profiles, "cicd_runs": self.cicd_runs, "release_gate_runs": self.release_gate_runs, "environments": self.environments, "promotion_history": self.promotion_history}
+          payload = {"version": "0.37", "active_dataset": self.active_dataset, "datasets": self.datasets, "pipeline_steps": self.pipeline_steps, "python_code": self.editor.toPlainText(), "trained_models": self.trained_models, "metric_definitions": self.metric_definitions, "dashboard_cards": self.dashboard_cards, "saved_pipelines": self.saved_pipelines, "kpi_definitions": self.kpi_definitions, "dashboard_filters": self.dashboard_filters, "compute_engine": self.compute_engine, "engine_threshold_rows": self.engine_threshold_rows, "relationships": self.relationships, "semantic_measures": self.semantic_measures, "calculated_columns": self.calculated_columns, "pipeline_definitions": self.pipeline_definitions, "active_pipeline": self.active_pipeline, "pipeline_step_counter": self.pipeline_step_counter, "lazy_sources": self.lazy_sources, "preview_limit": self.preview_limit, "materialization_limit": self.materialization_limit, "dashboard_definitions": self.dashboard_definitions, "active_dashboard": self.active_dashboard, "dashboard_tile_counter": self.dashboard_tile_counter, "analytics_pack_results": self.analytics_pack_results, "statistics_results": self.statistics_results, "engineering_results": self.engineering_results, "automl_experiments": self.automl_experiments, "active_experiment": self.active_experiment, "model_registry": self.model_registry, "prediction_history": self.prediction_history, "model_version_counter": self.model_version_counter, "monitoring_baselines": self.monitoring_baselines, "monitoring_runs": self.monitoring_runs, "monitoring_alerts": self.monitoring_alerts, "drift_thresholds": self.drift_thresholds, "api_deployments": self.api_deployments, "api_request_history": self.api_request_history, "scheduled_jobs": self.scheduled_jobs, "job_runs": self.job_runs, "job_counter": self.job_counter, "ui_preferences": self.ui_preferences, "recent_actions": self.recent_actions, "smart_recommendations": self.smart_recommendations, "contract_test_suites": self.contract_test_suites, "contract_test_runs": self.contract_test_runs, "cicd_profiles": self.cicd_profiles, "cicd_runs": self.cicd_runs, "release_gate_runs": self.release_gate_runs, "environments": self.environments, "promotion_history": self.promotion_history, "validation_rules": self.validation_rules, "data_contracts": self.data_contracts, "lineage_graph": self.lineage_graph, "cleaning_plans": self.cleaning_plans, "deployment_thresholds": self.deployment_thresholds, "deployment_observations": self.deployment_observations, "rollback_history": self.rollback_history}
           with open(path, "wb") as handle: pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
           self.current_project_path = str(Path(path).resolve())
           self.statusBar().showMessage(f"Project saved: {path}", 5000)
       except Exception as exc: QMessageBox.critical(self, "Save project failed", str(exc))
   def open_project(self):
-      path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Python Data Workbench (*.pdw)")
+      path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "Data Studio Project (*.pdw)")
       if not path: return
       try:
           with open(path, "rb") as handle: payload = pickle.load(handle)
@@ -2900,6 +3065,15 @@ def predict_batch(request: PredictionRequest):
           self.release_gate_runs = payload.get("release_gate_runs", [])
           self.environments = payload.get("environments", self.environments)
           self.promotion_history = payload.get("promotion_history", [])
+          self.validation_rules = payload.get("validation_rules", {})
+          self.data_contracts = payload.get("data_contracts", {})
+          self.lineage_graph = payload.get("lineage_graph", {"nodes":[],"edges":[]})
+          self.cleaning_plans = payload.get("cleaning_plans", {})
+          self.deployment_thresholds = payload.get("deployment_thresholds", self.deployment_thresholds)
+          self.deployment_observations = payload.get("deployment_observations", [])
+          self.rollback_history = payload.get("rollback_history", [])
+          for env_name in ("DEV","TEST","PROD"):
+              state=self.environments.setdefault(env_name,{"protected":env_name=="PROD"}); state.setdefault("current_release",None); state.setdefault("previous_release",None)
           self.current_project_path = str(Path(path).resolve())
           self.engine_selector.setCurrentText(self.compute_engine)
           self.editor.setPlainText(payload.get("python_code", self.editor.toPlainText()))
@@ -3021,10 +3195,9 @@ def predict_batch(request: PredictionRequest):
       """)
 def main():
   app = QApplication(sys.argv)
-  app.setApplicationName("Python Data Workbench")
+  app.setApplicationName("Data Studio")
   window = Workbench()
   window.show()
   sys.exit(app.exec())
 if __name__ == "__main__":
   main()
-

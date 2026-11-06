@@ -1,12 +1,8 @@
-
-"""Automation orchestrator for Python Data Workbench v0.24.
-
+"""Automation orchestrator for Data Studio v0.37.
 Loads a .pdw project, executes saved or due jobs, applies dependency and retry
 policies, records each run, and atomically persists changes without the GUI.
 """
-
 from __future__ import annotations
-
 import argparse
 import json
 import os
@@ -18,18 +14,12 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-
+from data_studio_core_v0_37 import validate_dataframe_expression
 import numpy as np
 import pandas as pd
-
-
-RUNTIME_VERSION = "0.36"
-
-
+RUNTIME_VERSION = "0.37"
 def utc_now() -> str:
   return datetime.now(timezone.utc).isoformat()
-
-
 def parse_utc(value: str | None) -> datetime | None:
   if not value:
       return None
@@ -37,8 +27,6 @@ def parse_utc(value: str | None) -> datetime | None:
   if parsed.tzinfo is None:
       parsed = parsed.replace(tzinfo=timezone.utc)
   return parsed.astimezone(timezone.utc)
-
-
 def next_schedule_time(schedule: str, anchor: datetime) -> datetime | None:
   schedule = str(schedule or "Manual")
   if schedule == "Hourly":
@@ -59,8 +47,6 @@ def next_schedule_time(schedule: str, anchor: datetime) -> datetime | None:
       last_day = (first_after - timedelta(days=1)).day
       return anchor.replace(year=year, month=month, day=min(anchor.day, last_day))
   return None
-
-
 def json_safe(value: Any) -> Any:
   if value is None or isinstance(value, (str, int, bool)):
       return value
@@ -75,8 +61,6 @@ def json_safe(value: Any) -> Any:
   if isinstance(value, (list, tuple, set)):
       return [json_safe(item) for item in value]
   return str(value)
-
-
 def read_project(path: Path) -> dict[str, Any]:
   if not path.exists():
       raise FileNotFoundError(f"Project not found: {path}")
@@ -87,8 +71,6 @@ def read_project(path: Path) -> dict[str, Any]:
   if not payload.get("datasets"):
       raise ValueError("Project contains no datasets.")
   return payload
-
-
 def atomic_write_project(path: Path, payload: dict[str, Any]) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   temporary = path.with_suffix(path.suffix + ".tmp")
@@ -97,8 +79,6 @@ def atomic_write_project(path: Path, payload: dict[str, Any]) -> None:
       handle.flush()
       os.fsync(handle.fileno())
   os.replace(temporary, path)
-
-
 @contextmanager
 def project_lock(project_path: Path, timeout: float = 30.0):
   lock_path = project_path.with_suffix(project_path.suffix + ".lock")
@@ -124,8 +104,6 @@ def project_lock(project_path: Path, timeout: float = 30.0):
           lock_path.unlink()
       except FileNotFoundError:
           pass
-
-
 class HeadlessRuntime:
   def __init__(self, payload: dict[str, Any], project_path: Path):
       self.payload = payload
@@ -142,7 +120,6 @@ class HeadlessRuntime:
       )
       self.scheduled_jobs = payload.setdefault("scheduled_jobs", {})
       self.job_runs = payload.setdefault("job_runs", [])
-
   def unique_dataset_name(self, base: str) -> str:
       name = base
       counter = 2
@@ -150,7 +127,6 @@ class HeadlessRuntime:
           name = f"{base}_{counter}"
           counter += 1
       return name
-
   @staticmethod
   def execute_pipeline_step(frame: pd.DataFrame, step: dict[str, Any]) -> pd.DataFrame:
       if not step.get("enabled", True):
@@ -191,7 +167,8 @@ class HeadlessRuntime:
           subset = [parameters["column"]] if parameters.get("column") else None
           output = output.dropna(subset=subset).reset_index(drop=True)
       elif operation == "calculated_column":
-          output[parameters["name"]] = output.eval(parameters["expression"])
+          validate_dataframe_expression(parameters["expression"], list(output.columns))
+          output[parameters["name"]] = output.eval(parameters["expression"], engine="python")
       elif operation == "filter":
           column = parameters["column"]
           operator = parameters["operator"]
@@ -226,7 +203,6 @@ class HeadlessRuntime:
       else:
           raise ValueError(f"Unsupported pipeline operation: {operation}")
       return output
-
   def execute_pipeline(self, name: str) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
       if name not in self.pipeline_definitions:
           raise KeyError(f"Pipeline not found: {name}")
@@ -251,7 +227,6 @@ class HeadlessRuntime:
               }
           )
       return result, audit
-
   @staticmethod
   def numeric_profile(series: pd.Series, bins: list[float]) -> dict[str, Any]:
       clean = pd.to_numeric(series, errors="coerce").dropna()
@@ -264,7 +239,6 @@ class HeadlessRuntime:
           "proportions": proportions.tolist(),
           "missing_rate": float(series.isna().mean()),
       }
-
   @staticmethod
   def categorical_profile(series: pd.Series, categories: list[str]) -> dict[str, Any]:
       values = series.astype("object").where(series.notna(), "__MISSING__").astype(str)
@@ -277,7 +251,6 @@ class HeadlessRuntime:
           ],
           "missing_rate": float(series.isna().mean()),
       }
-
   @staticmethod
   def psi(expected: list[float], actual: list[float]) -> float:
       expected_values = np.asarray(expected, dtype=float)
@@ -291,14 +264,12 @@ class HeadlessRuntime:
       return float(
           np.sum((actual_values - expected_values) * np.log(actual_values / expected_values))
       )
-
   def run_pipeline_job(self, job: dict[str, Any]) -> dict[str, Any]:
       pipeline_name = job["config"]["pipeline"]
       result, audit = self.execute_pipeline(pipeline_name)
       target = self.unique_dataset_name(f"{pipeline_name}_job_output")
       self.datasets[target] = result
       return {"output_dataset": target, "rows": len(result), "steps": len(audit), "audit": audit}
-
   def run_model_score_job(self, job: dict[str, Any]) -> dict[str, Any]:
       config = job["config"]
       deployment_name = config["deployment"]
@@ -321,7 +292,6 @@ class HeadlessRuntime:
       target = self.unique_dataset_name(f"{dataset_name}_scored")
       self.datasets[target] = frame
       return {"output_dataset": target, "rows": len(frame), "deployment": deployment_name}
-
   def run_export_job(self, job: dict[str, Any]) -> dict[str, Any]:
       config = job["config"]
       dataset_name = config["dataset"]
@@ -340,7 +310,6 @@ class HeadlessRuntime:
       else:
           raise ValueError(f"Unsupported export format: {export_format}")
       return {"path": str(destination), "rows": len(frame), "format": export_format}
-
   def run_drift_job(self, job: dict[str, Any]) -> dict[str, Any]:
       config = job["config"]
       baseline_name = config["baseline"]
@@ -415,7 +384,6 @@ class HeadlessRuntime:
       self.monitoring_runs.append(run)
       self.monitoring_alerts.extend(alerts)
       return {"critical": critical, "warning": warning, "features": len(summary)}
-
   def job_due(self, job: dict[str, Any], now: datetime | None = None) -> bool:
       now = now or datetime.now(timezone.utc)
       if not job.get("enabled", True) or job.get("schedule", "Manual") == "Manual":
@@ -428,7 +396,6 @@ class HeadlessRuntime:
           return True
       due_at = next_schedule_time(job.get("schedule", "Manual"), anchor)
       return due_at is not None and due_at <= now
-
   def dependency_status(self, job: dict[str, Any]) -> tuple[bool, list[str]]:
       blocked: list[str] = []
       for dependency_id in job.get("depends_on", []):
@@ -440,7 +407,6 @@ class HeadlessRuntime:
                   f"{dependency_id}: {dependency.get('last_status', 'never run')}"
               )
       return not blocked, blocked
-
   def _execute_job_action(self, job: dict[str, Any]) -> dict[str, Any]:
       job_type = job["type"]
       if job_type == "Pipeline":
@@ -452,7 +418,6 @@ class HeadlessRuntime:
       if job_type == "Monitoring drift check":
           return self.run_drift_job(job)
       raise ValueError(f"Unsupported job type: {job_type}")
-
   def execute_job(self, job_id: str, job_override: dict[str, Any] | None = None) -> dict[str, Any]:
       if job_override is None:
           if job_id not in self.scheduled_jobs:
@@ -559,7 +524,6 @@ class HeadlessRuntime:
       )
       self.payload["version"] = RUNTIME_VERSION
       return record
-
   def run_due_jobs(self, now: datetime | None = None) -> dict[str, Any]:
       now = now or datetime.now(timezone.utc)
       pending = [
@@ -619,24 +583,18 @@ class HeadlessRuntime:
           "blocked": sum(record.get("status") == "blocked" for record in records),
           "records": records,
       }
-
-
 def append_log(project_path: Path, record: dict[str, Any]) -> None:
   log_path = project_path.with_suffix(project_path.suffix + ".jobs.jsonl")
   with log_path.open("a", encoding="utf-8") as handle:
       handle.write(json.dumps(json_safe(record), ensure_ascii=False) + "\n")
-
-
 def load_job_file(path: Path) -> dict[str, Any]:
   job = json.loads(path.read_text(encoding="utf-8"))
   if not isinstance(job, dict) or not job.get("type"):
       raise ValueError("Job contract must be a JSON object with a job type.")
   return job
-
-
 def build_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(
-      description="Run and orchestrate Python Data Workbench jobs without the GUI."
+      description="Run and orchestrate Data Studio jobs without the GUI."
   )
   parser.add_argument("--project", required=True, help="Path to the .pdw project.")
   selection = parser.add_mutually_exclusive_group()
@@ -661,8 +619,6 @@ def build_parser() -> argparse.ArgumentParser:
       help="Stop daemon after this many cycles; zero runs until interrupted.",
   )
   return parser
-
-
 def save_json_output(path: str | None, result: dict[str, Any]) -> None:
   if not path:
       return
@@ -672,8 +628,6 @@ def save_json_output(path: str | None, result: dict[str, Any]) -> None:
       json.dumps(json_safe(result), indent=2, ensure_ascii=False) + "\n",
       encoding="utf-8",
   )
-
-
 def run_cycle(
   arguments: argparse.Namespace, project_path: Path, destination: Path
 ) -> tuple[dict[str, Any], int]:
@@ -725,8 +679,6 @@ def run_cycle(
           atomic_write_project(destination, payload)
       append_log(destination, record)
       return record, 0 if record["status"] == "success" else 1
-
-
 def main(argv: list[str] | None = None) -> int:
   arguments = build_parser().parse_args(argv)
   project_path = Path(arguments.project).expanduser().resolve()
@@ -774,8 +726,5 @@ def main(argv: list[str] | None = None) -> int:
       }
       print(json.dumps(failure, indent=2), file=sys.stderr)
       return 2
-
-
 if __name__ == "__main__":
   raise SystemExit(main())
-

@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.37
+Data Studio rename, restoration of missing governance actions, Deployment Observability & Rollback Studio, health scoring, rollback recommendations/history, safer expression execution, corrected runtime references, pure core module and automated tests.
 ## v0.36
 Environment Promotion & Deployment Governance: DEV/TEST/PROD model, guarded PROD promotion, persistent promotion evidence, protected-environment foundation and GitHub Actions deployment workflow export.
 ## v0.35

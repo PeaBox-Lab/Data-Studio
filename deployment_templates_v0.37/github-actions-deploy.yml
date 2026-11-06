@@ -1,0 +1,15 @@
+name: Data Studio Deploy
+on: workflow_dispatch
+jobs:
+  test:
+    environment: TEST
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python data_studio_ci_v0.37.py --project .
+  prod:
+    needs: test
+    environment: PROD
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploy approved Data Studio release"

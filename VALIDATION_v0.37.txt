@@ -1,0 +1,15 @@
+Data Studio v0.37 Validation Report
+===================================
+
+Release quality gate: PASSED
+Python compilation: PASS (desktop source, core, headless runtime)
+Core unit tests: PASS (6 tests)
+Governance/rollback action wiring: PASS
+v0.36 headless project compatibility smoke: PASS
+JSON output validity: PASS
+Required release documentation: PASS
+SHA-256 manifest: PASS
+
+Desktop runtime smoke: NOT EXECUTED in this build container because PySide6 is not installed. The desktop source compiles and static action wiring passes; install requirements_v0.37.txt on the target machine before launch.
+
+Known compatibility/security note: legacy .pdw and model files use pickle. Open only trusted files.
