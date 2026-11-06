@@ -1,0 +1,17 @@
+Data Studio v0.38 Validation Report
+===================================
+
+Release quality gate: PASSED
+Python compilation: PASS (7 application/runtime modules)
+Automated tests: PASS (13 tests)
+v0.36 project compatibility: PASS
+v0.37 project compatibility: PASS
+Desktop modular imports and retained action wiring: PASS
+Headless state migration and shared scheduling/retry integration: PASS
+Structured diagnostic JSONL evidence: PASS
+Required release documentation: PASS
+ZIP/checksum verification: PASS
+
+Desktop live-window smoke: NOT EXECUTED because PySide6 is not installed in this build container. Static compilation and action wiring passed. Install requirements_v0.38.txt on the target machine before launch.
+
+Security note: legacy .pdw and model files still use pickle for compatibility. Open only trusted files. Replacement is planned for v0.39.

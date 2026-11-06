@@ -1,4 +1,4 @@
-"""Pure, testable governance and deployment-health logic for Data Studio v0.37."""
+"""Pure, testable governance and deployment-health logic for Data Studio v0.38."""
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
@@ -6,7 +6,7 @@ from typing import Any
 import ast
 import math
 
-VERSION = "0.37"
+VERSION = "0.38"
 DEFAULT_THRESHOLDS = {
     "healthy": 85,
     "degraded": 65,

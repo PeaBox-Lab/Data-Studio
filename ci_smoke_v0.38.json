@@ -1,0 +1,57 @@
+{
+  "version": "0.38",
+  "product": "Data Studio",
+  "status": "PASSED",
+  "checks": [
+    {
+      "status": "PASS",
+      "check": "required release files",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_v0.38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_core_v0_38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_state_v0_38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_diagnostics_v0_38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_jobs_v0_38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_tasks_v0_38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "compile data_studio_headless_v0.38.py",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "governance and rollback actions",
+      "details": ""
+    },
+    {
+      "status": "PASS",
+      "check": "core unit tests",
+      "details": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.017s\n\nOK\n"
+    }
+  ]
+}

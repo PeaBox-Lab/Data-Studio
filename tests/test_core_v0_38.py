@@ -1,6 +1,6 @@
 import unittest
 import pandas as pd
-from data_studio_core_v0_37 import calculate_deployment_health, promotion_readiness, infer_validation_rules, validate_frame, workspace_health, safe_math_eval
+from data_studio_core_v0_38 import calculate_deployment_health, promotion_readiness, infer_validation_rules, validate_frame, workspace_health, safe_math_eval
 
 class CoreTests(unittest.TestCase):
     def test_healthy_deployment(self):

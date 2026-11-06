@@ -1,4 +1,6 @@
 # Cumulative Changelog
+## v0.38
+Modular Application Core: project-state migration and validation, structured diagnostics, shared job policies, background-task foundation, desktop/headless integration, and expanded regression tests.
 ## v0.37
 Data Studio rename, restoration of missing governance actions, Deployment Observability & Rollback Studio, health scoring, rollback recommendations/history, safer expression execution, corrected runtime references, pure core module and automated tests.
 ## v0.36

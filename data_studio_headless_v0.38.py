@@ -1,4 +1,4 @@
-"""Automation orchestrator for Data Studio v0.37.
+"""Automation orchestrator for Data Studio v0.38.
 Loads a .pdw project, executes saved or due jobs, applies dependency and retry
 policies, records each run, and atomically persists changes without the GUI.
 """
@@ -14,10 +14,13 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from data_studio_core_v0_37 import validate_dataframe_expression
+from data_studio_core_v0_38 import validate_dataframe_expression
+from data_studio_state_v0_38 import migrate_project, validate_project
+from data_studio_jobs_v0_38 import next_schedule_time as shared_next_schedule_time, dependency_status as shared_dependency_status, execute_with_retry
+from data_studio_diagnostics_v0_38 import DiagnosticLog
 import numpy as np
 import pandas as pd
-RUNTIME_VERSION = "0.37"
+RUNTIME_VERSION = "0.38"
 def utc_now() -> str:
   return datetime.now(timezone.utc).isoformat()
 def parse_utc(value: str | None) -> datetime | None:
@@ -28,25 +31,7 @@ def parse_utc(value: str | None) -> datetime | None:
       parsed = parsed.replace(tzinfo=timezone.utc)
   return parsed.astimezone(timezone.utc)
 def next_schedule_time(schedule: str, anchor: datetime) -> datetime | None:
-  schedule = str(schedule or "Manual")
-  if schedule == "Hourly":
-      return anchor + timedelta(hours=1)
-  if schedule == "Daily":
-      return anchor + timedelta(days=1)
-  if schedule == "Weekly":
-      return anchor + timedelta(days=7)
-  if schedule == "Monthly":
-      year = anchor.year + (1 if anchor.month == 12 else 0)
-      month = 1 if anchor.month == 12 else anchor.month + 1
-      month_after = month + 1
-      year_after = year
-      if month_after == 13:
-          month_after = 1
-          year_after += 1
-      first_after = datetime(year_after, month_after, 1, tzinfo=timezone.utc)
-      last_day = (first_after - timedelta(days=1)).day
-      return anchor.replace(year=year, month=month, day=min(anchor.day, last_day))
-  return None
+  return shared_next_schedule_time(schedule, anchor)
 def json_safe(value: Any) -> Any:
   if value is None or isinstance(value, (str, int, bool)):
       return value
@@ -66,10 +51,10 @@ def read_project(path: Path) -> dict[str, Any]:
       raise FileNotFoundError(f"Project not found: {path}")
   with path.open("rb") as handle:
       payload = pickle.load(handle)
-  if not isinstance(payload, dict):
-      raise ValueError("Project payload must be a dictionary.")
-  if not payload.get("datasets"):
-      raise ValueError("Project contains no datasets.")
+  payload, changes = migrate_project(payload)
+  errors = validate_project(payload)
+  if errors: raise ValueError("Invalid project state: " + "; ".join(errors))
+  payload.setdefault("project_migration_history", []).extend(changes)
   return payload
 def atomic_write_project(path: Path, payload: dict[str, Any]) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +105,7 @@ class HeadlessRuntime:
       )
       self.scheduled_jobs = payload.setdefault("scheduled_jobs", {})
       self.job_runs = payload.setdefault("job_runs", [])
+      self.diagnostics = DiagnosticLog(payload.setdefault("diagnostic_events", []), project_path.with_suffix(project_path.suffix + ".diagnostics.jsonl"))
   def unique_dataset_name(self, base: str) -> str:
       name = base
       counter = 2
@@ -397,16 +383,7 @@ class HeadlessRuntime:
       due_at = next_schedule_time(job.get("schedule", "Manual"), anchor)
       return due_at is not None and due_at <= now
   def dependency_status(self, job: dict[str, Any]) -> tuple[bool, list[str]]:
-      blocked: list[str] = []
-      for dependency_id in job.get("depends_on", []):
-          dependency = self.scheduled_jobs.get(dependency_id)
-          if dependency is None:
-              blocked.append(f"{dependency_id}: missing")
-          elif dependency.get("last_status") != "success":
-              blocked.append(
-                  f"{dependency_id}: {dependency.get('last_status', 'never run')}"
-              )
-      return not blocked, blocked
+      return shared_dependency_status(job, self.scheduled_jobs)
   def _execute_job_action(self, job: dict[str, Any]) -> dict[str, Any]:
       job_type = job["type"]
       if job_type == "Pipeline":
@@ -463,35 +440,24 @@ class HeadlessRuntime:
       details: dict[str, Any] = {}
       max_retries = max(0, int(job.get("max_retries", 0)))
       retry_delay = max(0.0, float(job.get("retry_delay_seconds", 5.0)))
-      attempts: list[dict[str, Any]] = []
-      for attempt_number in range(1, max_retries + 2):
-          attempt_started = time.time()
-          try:
-              details = self._execute_job_action(job)
-              attempts.append(
-                  {
-                      "attempt": attempt_number,
-                      "status": "success",
-                      "duration_seconds": round(time.time() - attempt_started, 3),
-                  }
-              )
-              status = "success"
-              error = None
-              break
-          except Exception as exc:
-              status = "failed"
-              error = str(exc)
-              details = {"traceback": traceback.format_exc(limit=8)}
-              attempts.append(
-                  {
-                      "attempt": attempt_number,
-                      "status": "failed",
-                      "error": error,
-                      "duration_seconds": round(time.time() - attempt_started, 3),
-                  }
-              )
-              if attempt_number <= max_retries and retry_delay:
-                  time.sleep(retry_delay)
+      details, attempts, error = execute_with_retry(
+          lambda: self._execute_job_action(job),
+          max_retries=max_retries,
+          retry_delay_seconds=retry_delay,
+      )
+      status = "success" if error is None else "failed"
+      if details is None:
+          details = {"error": error}
+      self.diagnostics.emit(
+          "INFO" if status == "success" else "ERROR",
+          "headless.jobs",
+          "execute",
+          "Job execution finished",
+          job_id=job_id,
+          status=status,
+          attempts=len(attempts),
+          error=error,
+      )
       record = {
           "job_id": job_id,
           "job_name": job.get("name", job_id),
@@ -634,6 +600,7 @@ def run_cycle(
   with project_lock(project_path, arguments.lock_timeout):
       payload = read_project(project_path)
       runtime = HeadlessRuntime(payload, project_path)
+      runtime.diagnostics.info("headless","run_cycle","Headless cycle started",project=str(project_path))
       if arguments.list_jobs:
           result = {
               "project": str(project_path),

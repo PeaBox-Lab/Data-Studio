@@ -1,0 +1,11 @@
+{
+  "product": "Data Studio",
+  "version": "0.38",
+  "release": "Modular Application Core",
+  "baseline": "Data_Studio_v0.37",
+  "compatibility": "Migrates trusted v0.36 and v0.37 project state to v0.38",
+  "primary_entrypoint": "data_studio_v0.38.py",
+  "headless_entrypoint": "data_studio_headless_v0.38.py",
+  "quality_gate": "data_studio_ci_v0.38.py",
+  "status": "PASSED_WITH_GUI_RUNTIME_LIMITATION"
+}
