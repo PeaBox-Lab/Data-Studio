@@ -4,10 +4,14 @@ A local-first analytics workbench for cleaning, joining, analyzing, visualizing 
 tabular data. The long-term goal is one platform for the work people currently split across Excel,
 R, SAS, Tableau and Power BI.
 
-**Current status:** Phase 0 (foundation) and Phase 1 (kernel MVP) are implemented. The new
+**Current status:** Phase 0 (foundation), Phase 1 (kernel MVP), Phase 2A (typed
+descriptive analytics) and Phase 2B (inference and regression) are implemented. The new
 package can import CSV/Excel/JSON/Parquet/DuckDB files, run an ordered, validated pipeline
-with incremental reruns and undo, export results, and reopen a project reproducibly. v0.38
-remains a frozen desktop prototype kept runnable as a reference. See
+with incremental reruns and undo, profile and summarise the result, run hypothesis tests and
+regression models through the same typed analysis registry, export results, and reopen a
+project reproducibly. The browser workspace was redesigned around the analyst workflow
+(Overview, Data, Prepare, Analyze, Export). v0.38 remains a frozen desktop prototype kept
+runnable as a reference. See
 [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) for the review, gap analysis and phased plan.
 
 ## Documentation
@@ -57,8 +61,50 @@ data-studio export .\examples\demo .\data\clean.parquet
 ```
 
 The same project opens in the browser workspace, where datasets, schemas, previews,
-pipeline steps and exports are editable. Opening a project after a restart reproduces the
-same results because datasets, schemas, checksums and the pipeline are all on disk.
+pipeline steps, analyses and exports are editable. Opening a project after a restart
+reproduces the same results because datasets, schemas, checksums and the pipeline are all
+on disk.
+
+### Analyse the prepared data
+
+Analyses run on the **prepared pipeline output** by default, so the numbers always match the
+cleaned preview. Twelve analyses ship across Phase 2A (descriptive) and Phase 2B
+(inference and regression):
+
+| Analysis | What it answers |
+|---|---|
+| `descriptive_stats` | Count, missing, mean, standard deviation, quartiles and range per numeric column. |
+| `value_counts` | Most frequent values with counts and percentages, including a missing bucket. |
+| `crosstab` | Two-column cross-tabulation with counts or row/column/overall percentages. |
+| `correlation` | Pairwise Pearson or Spearman correlation matrix. |
+| `quality_profile` | Per-column completeness, distinct values, ranges, constant columns and duplicate rows. |
+| `t_test` | One-sample, two-sample (Welch or Student) or paired means, with CIs and Cohen's d. |
+| `anova` | One-way ANOVA with eta-squared, omega-squared and Tukey HSD comparisons. |
+| `chi_square` | Independence test for two categorical columns with expected counts and Cramer's V. |
+| `proportion_test` | One- or two-sample proportion z-tests with CIs and effect size h. |
+| `pairwise_tests` | All pairwise group comparisons with Bonferroni, Holm or FDR correction. |
+| `linear_regression` | OLS coefficients, standard errors, CIs, standardized betas, VIF and residual diagnostics. |
+| `logistic_regression` | Binary logistic regression with odds ratios, ROC AUC, accuracy and separation checks. |
+
+From the CLI:
+
+```powershell
+data-studio analyze .\examples\demo descriptive_stats --params '{"columns":["amount"]}'
+data-studio analyze .\examples\demo linear_regression --params '{"response":"amount","predictors":["score"]}'
+```
+
+From the API:
+
+```powershell
+curl -X POST http://127.0.0.1:8765/api/v1/analyses/run `
+  -H "Content-Type: application/json" `
+  -d '{"analysis":"quality_profile","params":{}}'
+```
+
+Every analysis returns an `AnalysisResult` — typed tables, scalar metrics, diagnostics,
+a plain-language narrative and provenance — so the workspace, CLI, API and future reports
+render exactly the same numbers. Pass `"use_pipeline": false` to analyse a raw dataset.
+
 
 ## Run the legacy prototype
 

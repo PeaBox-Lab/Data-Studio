@@ -19,7 +19,7 @@ def test_health_reports_version_and_status() -> None:
     }
 
 
-def test_meta_describes_phase_one_capabilities() -> None:
+def test_meta_describes_phase_two_capabilities() -> None:
     client = TestClient(create_app())
     response = client.get("/api/v1/meta")
     assert response.status_code == 200
@@ -28,14 +28,15 @@ def test_meta_describes_phase_one_capabilities() -> None:
     assert payload["version"] == __version__
     assert payload["api_version"] == API_VERSION
     assert payload["project_format_version"] == PROJECT_FORMAT_VERSION
-    assert payload["phase"] == 1
+    assert payload["phase"] == 2
     assert payload["capabilities"]["projects"] is True
     assert payload["capabilities"]["datasets"] is True
     assert payload["capabilities"]["pipelines"] is True
     assert payload["capabilities"]["exports"] is True
-    assert payload["capabilities"]["analyses"] is False
+    assert payload["capabilities"]["analyses"] is True
     assert payload["capabilities"]["dashboards"] is False
     assert payload["operations"] >= 25
+    assert payload["analysis_operations"] >= 5
 
 
 def test_index_renders_workspace() -> None:
@@ -62,6 +63,8 @@ def test_openapi_schema_includes_system_and_phase_one_endpoints() -> None:
     assert "/api/v1/datasets" in schema["paths"]
     assert "/api/v1/pipeline" in schema["paths"]
     assert "/api/v1/run" in schema["paths"]
+    assert "/api/v1/analyses" in schema["paths"]
+    assert "/api/v1/analyses/run" in schema["paths"]
     assert "/" not in schema["paths"]
 
 

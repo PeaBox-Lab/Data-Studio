@@ -11,6 +11,7 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext
 from ..engine.duckdb_engine import EngineError
 from ..io.sniff import CsvOptions
 from ..kernel.table import TableData
@@ -404,6 +405,65 @@ def _cmd_export(args: argparse.Namespace) -> int:
         return _fail(exc)
 
 
+def _cmd_analyses(args: argparse.Namespace) -> int:
+    catalog = DEFAULT_ANALYSIS_REGISTRY.catalog()
+    if args.json:
+        _print_json(catalog)
+        return 0
+    _print_table(
+        ("name", "category", "title"),
+        [(item["name"], item["category"], item["title"]) for item in catalog],
+    )
+    return 0
+
+
+def _cmd_analyze(args: argparse.Namespace) -> int:
+    try:
+        params = _read_params(args.params)
+        with _open(args) as project:
+            if args.raw:
+                dataset = args.dataset or project.manifest.active_dataset
+                if not dataset:
+                    raise ProjectError("The project has no dataset to analyse.")
+                context = AnalysisContext(
+                    dataset=dataset,
+                    table=project.dataset_table(dataset),
+                )
+            else:
+                result = project.run_pipeline(
+                    dataset_id=args.dataset,
+                    count_rows=False,
+                )
+                context = AnalysisContext(
+                    dataset=result.dataset,
+                    table=result.table,
+                    step_ids=tuple(step.step_id for step in result.steps),
+                )
+            analysis = DEFAULT_ANALYSIS_REGISTRY.run(args.analysis, context, params)
+            if args.json:
+                _print_json(analysis.to_dict())
+                return 0
+            print(analysis.title)
+            if analysis.narrative:
+                print(analysis.narrative)
+                print("")
+            for name, value in analysis.metrics.items():
+                print(f"  {name:<18} {_cell(value)}")
+            for table in analysis.tables:
+                print("")
+                print(table.title)
+                _print_table(table.columns, table.rows)
+                if table.note:
+                    print(table.note)
+            if analysis.diagnostics:
+                print("")
+                for diagnostic in analysis.diagnostics:
+                    print(f"  [{diagnostic.severity}] {diagnostic.message}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -531,6 +591,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export.add_argument("--json", action="store_true", help="Emit JSON.")
     export.set_defaults(handler=_cmd_export)
+
+    analyses = subparsers.add_parser("analyses", help="List available analyses.")
+    analyses.add_argument("--json", action="store_true", help="Emit JSON.")
+    analyses.set_defaults(handler=_cmd_analyses)
+
+    analyze = subparsers.add_parser(
+        "analyze", help="Run an analysis on the prepared pipeline output."
+    )
+    analyze.add_argument("project", help="Project directory.")
+    analyze.add_argument("analysis", help="Registered analysis name.")
+    analyze.add_argument("--params", help="Analysis parameters as JSON, @file or -.")
+    analyze.add_argument("--dataset", help="Override the dataset.")
+    analyze.add_argument(
+        "--raw",
+        action="store_true",
+        help="Analyse the raw dataset instead of the pipeline output.",
+    )
+    analyze.add_argument("--json", action="store_true", help="Emit JSON.")
+    analyze.set_defaults(handler=_cmd_analyze)
 
     serve = subparsers.add_parser("serve", help="Run the local web application.")
     serve.add_argument("--host", default="127.0.0.1")

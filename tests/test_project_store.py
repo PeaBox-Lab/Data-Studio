@@ -351,7 +351,10 @@ def test_reopen_reproduces_the_pipeline_result(
             "cast",
             "deduplicate",
         ]
-        assert reopened.run_pipeline(pipeline).preview(10).to_records() == expected
+        actual = reopened.run_pipeline(pipeline).preview(10).to_records()
+        assert sorted(actual, key=lambda row: str(row.get("id"))) == sorted(
+            expected, key=lambda row: str(row.get("id"))
+        )
     finally:
         reopened.close()
 

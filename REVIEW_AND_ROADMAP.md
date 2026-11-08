@@ -4,6 +4,15 @@
 **Goal reviewed against:** a single platform for data modification, cleaning, processing, statistics, visualization and reporting — comparable in intent to SAS, R, Tableau, Power BI and Excel.
 **Review type:** static code review + measured inventory + quality-gate run.
 
+**Implementation status (updated):** Phase 0, Phase 1, Phase 2A and Phase 2B are complete.
+The new package has the kernel contracts, DuckDB engine, project format, 31-step registry,
+CLI, FastAPI surface and a redesigned browser workspace. Phase 2A added the analysis registry
+and five typed descriptive analyses. Phase 2B added seven inference and regression analyses
+(`t_test`, `anova`, `chi_square`, `proportion_test`, `pairwise_tests`, `linear_regression`,
+`logistic_regression`) with reference-tested numbers, assumption checks, effect sizes,
+confidence intervals and multiple-comparison corrections. The suite stands at 405 tests plus
+the frozen v0.38 gate. Phase 2C–2D below are the recommended next slices.
+
 ---
 
 ## 1. Verdict
@@ -360,15 +369,51 @@ clean/join 0.4 s, Parquet export 1.4 s, cached rerun 0.4 s on the development la
 
 ### Phase 2 — Statistics and results (4–6 weeks)
 
-- `AnalysisResult` renderers: result panel, HTML report, JSON.
-- Descriptive/crosstab/quality profile.
-- Hypothesis suite with assumption checks, effect sizes, CIs, corrections.
-- OLS/GLM/logistic + diagnostics; model comparison.
-- Time-series basics: decomposition, ACF/PACF, ARIMA/SARIMAX, backtest metrics.
-- Reference fixtures compared against R/statsmodels.
-- Chart spec + 10 chart types; report export to HTML/PDF.
+Phase 2 is delivered in four slices so the kernel, UI and correctness work stay coupled.
 
-**Done when:** 12 analyses produce typed, testable, exportable results identical (within tolerance) to reference implementations.
+**Phase 2A — Typed result core and descriptive analytics (delivered).**
+
+- `AnalysisResult` renderers: workspace result panel, JSON, CLI text.
+- `AnalysisRegistry`, `AnalysisContext` and `AnalysisDefinition` with `StepParam`-based
+  parameter validation and mandatory provenance.
+- `descriptive_stats`, `value_counts`, `crosstab`, `correlation`, `quality_profile`.
+- Typed API (`GET /api/v1/analyses`, `POST /api/v1/analyses/run`) and CLI
+  (`data-studio analyses`, `data-studio analyze`).
+- Redesigned workspace: Overview / Data / Prepare / Analyze / Export navigation, generated
+  step and analysis forms, metric cards, diagnostics, narrative and typed tables.
+
+**Phase 2B — Inference and model results (delivered).**
+
+- Hypothesis suite: one-sample, two-sample (Welch/Student) and paired t-tests; one-way ANOVA
+  with Tukey HSD; chi-square independence; one- and two-sample proportion tests; and
+  all-pairs comparisons with Bonferroni, Holm and Benjamini-Hochberg corrections.
+- Assumption checks: Levene, Shapiro-Wilk, expected-cell counts, VIF, Breusch-Pagan,
+  Durbin-Watson and separation checks. Effect sizes include Cohen's d, Hedges' g, eta-squared,
+  omega-squared, Cramer's V and proportion effect size h.
+- OLS and binary logistic regression with coefficient tables, standard errors, confidence
+  intervals, standardized betas, odds ratios, fit metrics and diagnostics. Implemented with
+  NumPy/SciPy so no runtime `statsmodels` dependency is required.
+- Reference fixtures generated independently with SciPy and `statsmodels` and pinned in
+  `tests/test_inference.py` to 1e-6.
+- Done: every inference result is typed, testable and reference-matched within tolerance.
+
+**Phase 2C — Time series, charts and reports (3–4 weeks).**
+
+- Time-series basics: decomposition, ACF/PACF, ARIMA/SARIMAX, backtest metrics.
+- Chart spec renderer for 10 chart types, driven by `AnalysisResult.charts`.
+- HTML report export (PDF next) that embeds the same typed results and chart specs.
+- Done when: an analysis can be run, charted and exported as a shareable report without code.
+
+**Phase 2D — Persistence and scheduling (2–3 weeks).**
+
+- Persist `AnalysisResult` documents under `analyses/` with input fingerprints and cache keys.
+- Refresh policy: re-run analyses when datasets or pipeline fingerprints change.
+- Scheduled project refresh that writes results and report artifacts.
+- Done when: a saved analysis survives restart, invalidates correctly and refreshes on a schedule.
+
+**Phase 2 exit criteria:** at least 12 analyses produce typed, testable, exportable results
+identical (within tolerance) to reference implementations, and the workspace, CLI and API
+render the same numbers.
 
 ### Phase 3 — Semantic model and dashboards (6–8 weeks)
 
@@ -423,9 +468,9 @@ Track these instead of feature counts:
 | Metric | v0.38 | Target after Phase 2 |
 |---|---:|---:|
 | Largest file/class | 3,229 lines | < 600 lines |
-| Tests | 13 | > 300, with reference fixtures |
+| Tests | 13 | 405, with reference fixtures |
 | Core logic coverage | ~0% | > 80% |
-| Analyses returning typed results | 0 | 12+ |
+| Analyses returning typed results | 0 | 12 (Phase 2A + 2B) → 18+ |
 | Operations usable headlessly & via API | partial | all |
 | Time to clean+analyze a 1M-row CSV | untested | < 60 s on a laptop |
 | Peak memory on 1M-row pipeline | ~full-frame × 21 | bounded / out-of-core |

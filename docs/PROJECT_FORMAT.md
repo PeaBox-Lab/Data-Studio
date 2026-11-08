@@ -49,7 +49,7 @@ Example:
   "manifest_version": "1.0",
   "project_id": "2f1c9b8e-4a4d-4a8a-9f0e-8b7d6c5a4e3f",
   "name": "Q4 Sales Review",
-  "app_version": "0.39.0.dev0",
+  "app_version": "0.41.0.dev0",
   "created_at": "2026-11-08T09:30:00+00:00",
   "updated_at": "2026-11-08T10:15:00+00:00",
   "datasets": [
@@ -300,7 +300,8 @@ Temporary files are not valid project files and are ignored by readers.
 
 The following are reserved by the layout and will be specified when their phases land:
 
-- `analyses/*.json` stored `AnalysisResult` documents,
+- `analyses/*.json` stored `AnalysisResult` documents — Phase 2A/2B run analyses on demand
+  and return them to the caller; they do not yet write results into the project,
 - `dashboards/*.json` dashboard specifications,
 - `models/` model artifacts and registry metadata,
 - `lineage.json` derived-table lineage.

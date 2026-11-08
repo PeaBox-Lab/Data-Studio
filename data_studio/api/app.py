@@ -1,8 +1,9 @@
 """FastAPI application for the local Data Studio client.
 
 Phase 1 exposes the project store, dataset import, schema/preview, the step catalog,
-pipeline editing, execution and export. Every endpoint is a thin wrapper over the
-kernel: no business logic lives here, so the CLI and the workspace UI behave identically.
+pipeline editing, execution and export. Phase 2 adds the analysis catalog and typed
+result execution. Every endpoint is a thin wrapper over the kernel: no business logic
+lives here, so the CLI and the workspace UI behave identically.
 
 The app owns one open project (see ``state.ProjectManager``). It starts with a project if
 ``create_app(project_root=...)`` is given or ``DATA_STUDIO_PROJECT`` is set; otherwise the
@@ -19,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext, AnalysisError
 from ..engine.duckdb_engine import EngineError
 from ..pipeline import Pipeline, PipelineRunError, make_step
 from ..pipeline.runner import PipelineRunner
@@ -100,6 +102,10 @@ def create_app(
     async def step_error(_: Request, exc: StepError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=400)
 
+    @app.exception_handler(AnalysisError)
+    async def analysis_error(_: Request, exc: AnalysisError) -> JSONResponse:
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
     @app.exception_handler(FileNotFoundError)
     async def missing_file(_: Request, exc: FileNotFoundError) -> JSONResponse:
         return JSONResponse({"detail": str(exc)}, status_code=404)
@@ -145,16 +151,17 @@ def create_app(
             "version": __version__,
             "api_version": API_VERSION,
             "project_format_version": PROJECT_FORMAT_VERSION,
-            "phase": 1,
+            "phase": 2,
             "capabilities": {
                 "projects": True,
                 "datasets": True,
                 "pipelines": True,
                 "exports": True,
-                "analyses": False,
+                "analyses": True,
                 "dashboards": False,
             },
             "operations": len(DEFAULT_REGISTRY),
+            "analysis_operations": len(DEFAULT_ANALYSIS_REGISTRY),
         }
 
     # -- project lifecycle -------------------------------------------------
@@ -343,6 +350,48 @@ def create_app(
             "rows": result.rows,
             "schema": result.schema.to_dict(),
         }
+
+    # -- analyses ----------------------------------------------------------
+
+    @app.get("/api/v1/analyses", tags=["analyses"])
+    def analyses_catalog() -> list[dict[str, Any]]:
+        return DEFAULT_ANALYSIS_REGISTRY.catalog()
+
+    @app.post("/api/v1/analyses/run", tags=["analyses"])
+    def run_analysis(payload: dict[str, Any]) -> dict[str, Any]:
+        name = payload.get("analysis")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("An object with an 'analysis' name is required.")
+        params = payload.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            raise ValueError("Analysis 'params' must be an object.")
+        dataset_id = payload.get("dataset")
+        if dataset_id is not None and not isinstance(dataset_id, str):
+            raise ValueError("Analysis 'dataset' must be a string or null.")
+        dataset_id = dataset_id.strip() if dataset_id else None
+
+        active = project()
+        use_pipeline = bool(payload.get("use_pipeline", True))
+        if use_pipeline:
+            run = active.run_pipeline(dataset_id=dataset_id, count_rows=False)
+            context = AnalysisContext(
+                dataset=run.dataset,
+                table=run.table,
+                step_ids=tuple(step.step_id for step in run.steps),
+                engine="duckdb",
+            )
+        else:
+            target = dataset_id or active.manifest.active_dataset
+            if not target:
+                raise ProjectError("The project has no active dataset to analyse.")
+            context = AnalysisContext(
+                dataset=target,
+                table=active.dataset_table(target),
+                engine="duckdb",
+            )
+        return DEFAULT_ANALYSIS_REGISTRY.run(name, context, params).to_dict()
 
     return app
 

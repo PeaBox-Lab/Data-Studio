@@ -262,6 +262,86 @@ and reopen the project later with identical output. A general DAG editor is not 
 
 ---
 
+## ADR-012: Analyses are a registry of typed functions over a prepared context
+
+**Status:** Accepted
+
+**Context.** Descriptive statistics and data-quality checks were previously console output
+inside the monolith. The workspace, CLI and API must return identical numbers, the UI needs
+metadata to generate forms, and statistical behaviour must be testable against references.
+Hypothesis tests and models will arrive later, so the contract must not assume a particular
+statistic.
+
+**Decision.**
+
+- An analysis is an `AnalysisDefinition`: a stable `name`, `title`, `category`,
+  `description`, a `StepParam` list and a pure `run(context, params)` function.
+- `AnalysisContext` carries the dataset name, a lazy `DuckDBTable`, the ordered pipeline
+  `step_ids` and the engine name. It builds the `Provenance` for every result, so a result
+  can always be traced to the exact data and pipeline that produced it.
+- `AnalysisRegistry` validates parameter names, applies defaults and coerces values before
+  execution. Unknown analyses and parameter errors raise `AnalysisError`; unexpected
+  exceptions are wrapped so the API can return HTTP 400 with a clear message.
+- Every analysis returns an `AnalysisResult` (typed tables, metrics, diagnostics, narrative,
+  chart specs, provenance). No analysis prints, writes HTTP, or depends on a UI toolkit.
+- Analyses run on the prepared pipeline output by default. A caller may pass
+  `use_pipeline: false` (API) or `--raw` (CLI) to analyse a raw dataset instead.
+- The API catalog (`GET /api/v1/analyses`) and the CLI catalog (`data-studio analyses`) are
+  generated from the same registry the workspace uses to build its forms.
+- Phase 2A analyses are computed on demand; storing `AnalysisResult` documents under
+  `analyses/` is a later format decision.
+
+**Consequences.**
+
+- Adding an analysis is one pure module plus a registry entry; all surfaces pick it up.
+- Parameters, defaults and validation stay consistent between steps and analyses because
+  both use `StepParam`.
+- Reference fixtures are pinned in Phase 2B for every inference and regression result. Result
+  caching and persisted analysis documents remain future work and can be added without
+  changing the `AnalysisDefinition` contract.
+- Analyses are stateless, so they are safe to run from a request thread, a CLI process or a
+  scheduled job.
+
+---
+
+## ADR-013: Inference is computed in-kernel with SciPy and NumPy
+
+**Status:** Accepted
+
+**Context.** Phase 2B adds hypothesis tests and regression models. The obvious shortcut is to
+call `statsmodels` for everything, but that adds a large optional dependency, produces result
+objects with inconsistent shapes, and hides diagnostics that the workspace must display. The
+platform needs one typed result per analysis, stable reference-tested numbers, and a runtime
+that installs with a single command on Windows.
+
+**Decision.**
+
+- SciPy is a core dependency; NumPy and pandas already are. `statsmodels` stays an optional
+  `stats` extra and is used only to generate reference fixtures during development.
+- Hypothesis tests use SciPy's distribution functions directly. t-tests, ANOVA, chi-square and
+  proportion tests calculate their own confidence intervals, effect sizes and assumption
+  diagnostics so the numbers and the explanations always travel together.
+- OLS uses normal equations with `numpy.linalg.lstsq`, a pseudo-inverse covariance matrix and
+  explicit rank-deficiency handling. Logistic regression uses Newton-Raphson/IRLS with the
+  observed information matrix. Both emit coefficient tables, standard errors, confidence
+  intervals, p-values and fit diagnostics.
+- Multiple-comparison corrections (`none`, `bonferroni`, `holm`, `fdr_bh`) are implemented as
+  a shared helper and applied to pairwise tests.
+- Numeric table cells are rounded at the kernel boundary. Reference tests compare analytic
+  outputs to pinned SciPy/`statsmodels` values within 1e-6.
+
+**Consequences.**
+
+- A normal install has no `statsmodels`/`patsy` dependency and `pip check` stays clean.
+- Every model exposes the same typed tables, metrics, diagnostics and narrative as the
+  descriptive analyses, so the API, CLI and workspace need no model-specific rendering.
+- Missing values are handled by complete-case filtering per analysis and reported through the
+  sample size and diagnostics.
+- Categorical predictors are represented by numeric indicators for now; formula syntax and
+  mixed-effects models remain future work.
+
+---
+
 ## Open decisions
 
 These are deliberately deferred; record the answer here when it is made.

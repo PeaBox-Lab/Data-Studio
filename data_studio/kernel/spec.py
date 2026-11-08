@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date, datetime, time
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
@@ -29,6 +31,34 @@ def _optional_text(value: str | None, field_name: str) -> str | None:
         raise TypeError(f"{field_name} must be a string or None.")
     stripped = value.strip()
     return stripped or None
+
+
+def _chart_cell(value: Any, row: int, key: str) -> Any:
+    """Coerce a chart data value to a JSON-safe scalar."""
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (date, datetime, time)):
+        return value.isoformat()
+    if hasattr(value, "item") and callable(value.item):
+        return _chart_cell(value.item(), row, key)
+    raise TypeError(f"Chart data row {row} field {key!r} is not a scalar value.")
+
+
+def _chart_data(rows: Sequence[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+    records: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise TypeError(f"Chart data row {index} must be a mapping.")
+        record: dict[str, Any] = {}
+        for key, value in row.items():
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("Chart data field names must be non-empty strings.")
+            record[key] = _chart_cell(value, index, key)
+        records.append(record)
+    return tuple(records)
 
 
 class ChartType(StrEnum):
@@ -127,6 +157,9 @@ class ChartSpec:
     chart_type: ChartType
     title: str
     encoding: Encoding = field(default_factory=Encoding)
+    data: tuple[Mapping[str, Any], ...] = field(
+        default_factory=tuple, compare=False, hash=False, repr=False
+    )
     options: Mapping[str, Any] = field(default_factory=dict, compare=False, hash=False)
     transforms: tuple[Mapping[str, Any], ...] = ()
     schema_version: str = CHART_SCHEMA_VERSION
@@ -146,6 +179,7 @@ class ChartSpec:
 
         if not isinstance(self.encoding, Encoding):
             raise TypeError("Chart encoding must be an Encoding instance.")
+        object.__setattr__(self, "data", _chart_data(self.data))
         if not isinstance(self.options, Mapping):
             raise TypeError("Chart options must be a mapping.")
         object.__setattr__(self, "options", dict(self.options))
@@ -161,6 +195,7 @@ class ChartSpec:
             "chart_type": self.chart_type.value,
             "title": self.title,
             "encoding": self.encoding.to_dict(),
+            "data": [dict(row) for row in self.data],
             "options": dict(self.options),
             "transforms": [dict(transform) for transform in self.transforms],
             "schema_version": self.schema_version,
@@ -172,6 +207,7 @@ class ChartSpec:
             chart_type=ChartType(str(payload["chart_type"])),
             title=str(payload["title"]),
             encoding=Encoding.from_dict(payload.get("encoding", {})),
+            data=tuple(payload.get("data", [])),
             options=dict(payload.get("options", {})),
             transforms=tuple(payload.get("transforms", [])),
             schema_version=str(payload.get("schema_version", CHART_SCHEMA_VERSION)),
