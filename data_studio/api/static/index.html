@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Studio</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7fb; --panel: #ffffff; --border: #e5e7eb; --muted: #6b7280;
+    --text: #111827; --accent: #1d4ed8; --accent-soft: #e0e7ff; --danger: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b1020; --panel: #131a2f; --border: #24304d; --muted: #9ca3af;
+      --text: #e5e7eb; --accent: #93c5fd; --accent-soft: #1e1b4b; --danger: #fca5a5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; padding: 14px 22px;
+    border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0;
+    z-index: 2;
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: -.02em; }
+  header .badge {
+    padding: 3px 9px; border-radius: 999px; background: var(--accent-soft);
+    color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  header .spacer { flex: 1; }
+  header .project-label { font-size: 13px; color: var(--muted); }
+  main { display: grid; gap: 16px; padding: 18px 22px 40px; max-width: 1500px; }
+  section {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 14px 16px;
+  }
+  h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  input, select, textarea, button {
+    font: inherit; font-size: 13px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); padding: 7px 10px;
+  }
+  textarea { width: 100%; min-height: 68px; font-family: ui-monospace, "Cascadia Code", monospace; }
+  button { cursor: pointer; background: var(--panel); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); }
+  .scroll { overflow: auto; max-height: 340px; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 9px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+  tbody tr:hover { background: var(--accent-soft); }
+  ul.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  ul.list li {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 9px; cursor: pointer;
+  }
+  ul.list li.active { border-color: var(--accent); background: var(--accent-soft); }
+  ul.list li .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  ul.list li.step { cursor: default; justify-content: space-between; }
+  .empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+  .status { font-size: 12.5px; color: var(--muted); }
+  .status.error { color: var(--danger); }
+  .pill { font-size: 11px; padding: 2px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+  pre { font-size: 12px; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Data Studio</h1>
+  <span class="badge">Phase 1</span>
+  <span class="spacer"></span>
+  <span class="project-label" id="projectLabel">No project open</span>
+  <button id="closeProject" hidden>Close</button>
+</header>
+
+<main>
+  <section id="projectPanel">
+    <h2>Project</h2>
+    <div class="row">
+      <input id="projectPath" placeholder="C:\path\to\Project" style="flex:1; min-width:260px">
+      <input id="projectName" placeholder="New project name (optional)" style="min-width:200px">
+      <button id="createProject">Create</button>
+      <button id="openProject" class="primary">Open</button>
+    </div>
+    <p class="status" id="projectStatus">Create a folder project or open an existing one.</p>
+  </section>
+
+  <div class="grid-2">
+    <section id="datasetsPanel">
+      <h2>Datasets</h2>
+      <div class="row" style="margin-bottom:10px">
+        <input type="file" id="datasetFile" multiple>
+        <input id="datasetId" placeholder="Dataset id (optional)" style="width:180px">
+        <button id="importDataset" class="primary">Import</button>
+      </div>
+      <ul class="list" id="datasetList"></ul>
+      <p class="status" id="datasetStatus"></p>
+    </section>
+
+    <section id="schemaPanel">
+      <h2>Schema</h2>
+      <div class="scroll" id="schemaTable"><p class="empty">Select a dataset.</p></div>
+    </section>
+  </div>
+
+  <section id="previewPanel">
+    <h2>Preview</h2>
+    <div class="scroll" id="previewTable"><p class="empty">Select a dataset.</p></div>
+  </section>
+
+  <section id="pipelinePanel">
+    <h2>Pipeline</h2>
+    <ul class="list" id="stepList"></ul>
+    <p class="status" id="stepStatus"></p>
+    <div class="row" style="margin-top:10px">
+      <select id="operationSelect"></select>
+      <button id="addStep" class="primary">Add step</button>
+      <button id="undoStep">Undo last</button>
+    </div>
+    <textarea id="stepParams" placeholder='Step parameters as JSON, e.g. {"columns": ["region"]}'></textarea>
+    <pre id="operationHelp" class="status"></pre>
+  </section>
+
+  <section id="runPanel">
+    <h2>Run</h2>
+    <div class="row">
+      <button id="runPipeline" class="primary">Run pipeline</button>
+      <span class="status" id="runStatus"></span>
+    </div>
+    <p class="status" id="runSummary"></p>
+    <div class="scroll" id="runTable"></div>
+    <div class="row" style="margin-top:12px">
+      <input id="exportPath" placeholder="export.parquet / export.csv / export.json / export.xlsx" style="flex:1; min-width:260px">
+      <button id="exportResult">Export</button>
+      <span class="status" id="exportStatus"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+const state = { project: null, datasets: [], operations: [], selected: null, run: null };
+
+function api(path, options = {}) {
+  return fetch(path, options).then(async (response) => {
+    const text = await response.text();
+    let payload = null;
+    if (text) {
+      try { payload = JSON.parse(text); } catch (_) { payload = text; }
+    }
+    if (!response.ok) {
+      const detail = payload && payload.detail ? payload.detail : (text || response.statusText);
+      throw new Error(detail);
+    }
+    return payload;
+  });
+}
+
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of children) {
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function setStatus(id, message, error = false) {
+  const node = document.getElementById(id);
+  node.textContent = message || "";
+  node.classList.toggle("error", Boolean(error));
+}
+
+function renderGrid(containerId, schema, rows) {
+  const container = document.getElementById(containerId);
+  container.replaceChildren();
+  if (!schema || !schema.columns || !schema.columns.length) {
+    container.append(el("p", { class: "empty", text: "No columns." }));
+    return;
+  }
+  const table = el("table");
+  const head = el("thead");
+  const headRow = el("tr");
+  for (const column of schema.columns) headRow.append(el("th", { text: column.name }));
+  head.append(headRow);
+  const body = el("tbody");
+  for (const row of rows) {
+    const tr = el("tr");
+    for (const value of row) tr.append(el("td", { text: value === null ? "" : String(value) }));
+    body.append(tr);
+  }
+  table.append(head, body);
+  container.append(table);
+}
+
+function renderDatasets() {
+  const list = document.getElementById("datasetList");
+  list.replaceChildren();
+  if (!state.datasets.length) {
+    list.append(el("p", { class: "empty", text: "Import a CSV, Excel, JSON, Parquet or DuckDB file." }));
+    return;
+  }
+  for (const dataset of state.datasets) {
+    const item = el("li", { class: dataset.id === state.selected ? "active" : "" });
+    item.append(el("strong", { text: dataset.id }));
+    item.append(el("span", { class: "meta", text: `${dataset.rows ?? "?"} rows · ${dataset.columns} cols · ${dataset.format}` }));
+    item.onclick = () => selectDataset(dataset.id);
+    list.append(item);
+  }
+}
+
+async function selectDataset(datasetId) {
+  state.selected = datasetId;
+  renderDatasets();
+  try {
+    const [schema, preview] = await Promise.all([
+      api(`/api/v1/datasets/${encodeURIComponent(datasetId)}/schema`),
+      api(`/api/v1/datasets/${encodeURIComponent(datasetId)}/preview?limit=50`),
+    ]);
+    const schemaBox = document.getElementById("schemaTable");
+    schemaBox.replaceChildren();
+    const table = el("table");
+    const head = el("thead"); const headRow = el("tr");
+    for (const label of ["column", "type", "nullable", "role"]) headRow.append(el("th", { text: label }));
+    head.append(headRow);
+    const body = el("tbody");
+    for (const column of schema.columns) {
+      const tr = el("tr");
+      tr.append(el("td", { text: column.name }), el("td", { text: column.dtype }),
+                el("td", { text: column.nullable ? "yes" : "no" }), el("td", { text: column.role || "" }));
+      body.append(tr);
+    }
+    table.append(head, body);
+    schemaBox.append(table);
+    renderGrid("previewTable", preview.schema, preview.rows);
+  } catch (error) {
+    setStatus("datasetStatus", error.message, true);
+  }
+}
+
+async function refreshProject() {
+  const payload = await api("/api/v1/project");
+  state.project = payload.open ? payload.project : null;
+  const label = document.getElementById("projectLabel");
+  const closeButton = document.getElementById("closeProject");
+  if (state.project) {
+    label.textContent = `${state.project.name} · ${state.project.root}`;
+    closeButton.hidden = false;
+    await refreshDatasets();
+    await refreshPipeline();
+  } else {
+    label.textContent = "No project open";
+    closeButton.hidden = true;
+    state.datasets = [];
+    renderDatasets();
+  }
+}
+
+async function refreshDatasets() {
+  state.datasets = await api("/api/v1/datasets");
+  if (!state.datasets.some((item) => item.id === state.selected)) {
+    state.selected = state.datasets.length ? state.datasets[0].id : null;
+  }
+  renderDatasets();
+  if (state.selected) await selectDataset(state.selected);
+}
+
+async function refreshOperations() {
+  state.operations = await api("/api/v1/operations");
+  const select = document.getElementById("operationSelect");
+  select.replaceChildren();
+  for (const operation of state.operations) {
+    const option = el("option", { value: operation.name, text: `${operation.category} · ${operation.name}` });
+    select.append(option);
+  }
+  updateOperationHelp();
+}
+
+function updateOperationHelp() {
+  const name = document.getElementById("operationSelect").value;
+  const operation = state.operations.find((item) => item.name === name);
+  document.getElementById("operationHelp").textContent = operation
+    ? `${operation.description}\nparams: ${operation.params.map((p) => p.name + (p.required ? "" : "?")).join(", ") || "(none)"}`
+    : "";
+}
+
+async function refreshPipeline() {
+  const pipeline = await api("/api/v1/pipeline");
+  const list = document.getElementById("stepList");
+  list.replaceChildren();
+  if (!pipeline.steps.length) {
+    list.append(el("p", { class: "empty", text: "No steps yet. Add one below." }));
+  }
+  pipeline.steps.forEach((step, index) => {
+    const item = el("li", { class: "step" });
+    item.append(el("span", { text: `${index + 1}. ${step.id}` }));
+    item.append(el("span", { class: "meta", text: step.operation }));
+    const remove = el("button", { class: "danger", text: "Remove" });
+    remove.onclick = async () => {
+      try {
+        await api(`/api/v1/pipeline/steps/${encodeURIComponent(step.id)}`, { method: "DELETE" });
+        await refreshPipeline();
+      } catch (error) { setStatus("stepStatus", error.message, true); }
+    };
+    item.append(remove);
+    list.append(item);
+  });
+  setStatus("stepStatus", `${pipeline.steps.length} step(s) · dataset: ${pipeline.dataset || "(active)"}`);
+}
+
+document.getElementById("createProject").onclick = async () => {
+  const path = document.getElementById("projectPath").value.trim();
+  const name = document.getElementById("projectName").value.trim();
+  if (!path) { setStatus("projectStatus", "Enter a project folder path.", true); return; }
+  try {
+    await api("/api/v1/project/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, name: name || null }),
+    });
+    setStatus("projectStatus", "Project created.");
+    await refreshProject();
+  } catch (error) { setStatus("projectStatus", error.message, true); }
+};
+
+document.getElementById("openProject").onclick = async () => {
+  const path = document.getElementById("projectPath").value.trim();
+  if (!path) { setStatus("projectStatus", "Enter a project folder path.", true); return; }
+  try {
+    await api("/api/v1/project/open", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    setStatus("projectStatus", "Project opened.");
+    await refreshProject();
+  } catch (error) { setStatus("projectStatus", error.message, true); }
+};
+
+document.getElementById("closeProject").onclick = async () => {
+  await api("/api/v1/project/close", { method: "POST" });
+  state.selected = null; state.run = null;
+  await refreshProject();
+};
+
+document.getElementById("importDataset").onclick = async () => {
+  const files = document.getElementById("datasetFile").files;
+  const datasetId = document.getElementById("datasetId").value.trim();
+  if (!files.length) { setStatus("datasetStatus", "Choose at least one file.", true); return; }
+  try {
+    for (const file of files) {
+      const query = new URLSearchParams({ filename: file.name });
+      if (datasetId) query.set("dataset_id", datasetId);
+      await api(`/api/v1/datasets?${query.toString()}`, {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file,
+      });
+    }
+    setStatus("datasetStatus", `Imported ${files.length} file(s).`);
+    document.getElementById("datasetFile").value = "";
+    document.getElementById("datasetId").value = "";
+    await refreshDatasets();
+  } catch (error) { setStatus("datasetStatus", error.message, true); }
+};
+
+document.getElementById("operationSelect").onchange = updateOperationHelp;
+
+document.getElementById("addStep").onclick = async () => {
+  const operation = document.getElementById("operationSelect").value;
+  let params = {};
+  const text = document.getElementById("stepParams").value.trim();
+  if (text) {
+    try { params = JSON.parse(text); }
+    catch (error) { setStatus("stepStatus", "Params are not valid JSON.", true); return; }
+  }
+  try {
+    await api("/api/v1/pipeline/steps", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation, params }),
+    });
+    document.getElementById("stepParams").value = "";
+    setStatus("stepStatus", `Added ${operation}.`);
+    await refreshPipeline();
+  } catch (error) { setStatus("stepStatus", error.message, true); }
+};
+
+document.getElementById("undoStep").onclick = async () => {
+  try {
+    await api("/api/v1/pipeline/undo", { method: "POST" });
+    await refreshPipeline();
+  } catch (error) { setStatus("stepStatus", error.message, true); }
+};
+
+document.getElementById("runPipeline").onclick = async () => {
+  setStatus("runStatus", "Running...");
+  try {
+    const payload = await api(`/api/v1/run/preview?limit=100${state.selected ? `&dataset=${encodeURIComponent(state.selected)}` : ""}`, { method: "POST" });
+    state.run = payload;
+    setStatus("runStatus", "Done.");
+    document.getElementById("runSummary").textContent =
+      `${payload.run.rows ?? "?"} rows · ${payload.schema.columns.length} columns · ` +
+      `${payload.run.duration_ms.toFixed(1)} ms · cache hits ${payload.run.cache_hits}/${payload.run.steps.length}`;
+    renderGrid("runTable", payload.schema, payload.rows);
+  } catch (error) {
+    setStatus("runStatus", error.message, true);
+  }
+};
+
+document.getElementById("exportResult").onclick = async () => {
+  const destination = document.getElementById("exportPath").value.trim();
+  if (!destination) { setStatus("exportStatus", "Enter an output path.", true); return; }
+  try {
+    const payload = await api("/api/v1/export", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destination, dataset: state.selected || null }),
+    });
+    setStatus("exportStatus", `Wrote ${payload.rows ?? "?"} rows to ${payload.destination}`);
+  } catch (error) { setStatus("exportStatus", error.message, true); }
+};
+
+(async function boot() {
+  try {
+    await refreshOperations();
+    await refreshProject();
+  } catch (error) {
+    setStatus("projectStatus", error.message, true);
+  }
+})();
+</script>
+</body>
+</html>
