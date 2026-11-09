@@ -240,6 +240,51 @@ class SemanticMeasure:
 
 
 @dataclass(frozen=True, slots=True)
+class SemanticHierarchy:
+    """An ordered drill path through existing dimensions.
+
+    Levels are dimension names from outermost to innermost, for example
+    ``("region", "manager", "rep")``. Hierarchies let a chart tile start at the
+    coarsest level and drill into the levels below it without storing extra SQL.
+    """
+
+    name: str
+    levels: tuple[str, ...] = ()
+    title: str | None = None
+    description: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "name", _identifier(self.name, "Hierarchy name"))
+        levels = tuple(str(item).strip() for item in self.levels)
+        if not levels:
+            raise SemanticError("A hierarchy needs at least one level.")
+        if any(not item for item in levels):
+            raise SemanticError("Hierarchy levels must not be empty names.")
+        if len(set(levels)) != len(levels):
+            raise SemanticError("Hierarchy levels must be unique.")
+        object.__setattr__(self, "levels", levels)
+        object.__setattr__(self, "title", _title(self.title, _humanize(self.name)))
+        object.__setattr__(self, "description", str(self.description or ""))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "levels": list(self.levels),
+            "title": self.title,
+            "description": self.description,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> SemanticHierarchy:
+        return cls(
+            name=str(payload.get("name", "")),
+            levels=tuple(payload.get("levels", ())),
+            title=payload.get("title"),
+            description=str(payload.get("description", "")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SemanticModel:
     """A complete star-schema description for one project."""
 
@@ -248,6 +293,7 @@ class SemanticModel:
     relationships: tuple[Relationship, ...] = ()
     dimensions: tuple[SemanticDimension, ...] = ()
     measures: tuple[SemanticMeasure, ...] = ()
+    hierarchies: tuple[SemanticHierarchy, ...] = ()
     default_table: str | None = None
     schema_version: str = MODEL_SCHEMA_VERSION
 
@@ -308,6 +354,27 @@ class SemanticModel:
             raise SemanticError("Semantic measure names must be unique.")
         object.__setattr__(self, "measures", measures)
 
+        hierarchies = tuple(self.hierarchies)
+        if any(not isinstance(item, SemanticHierarchy) for item in hierarchies):
+            raise SemanticError(
+                "Semantic model hierarchies must be SemanticHierarchy instances."
+            )
+        hierarchy_names = [item.name for item in hierarchies]
+        if len(set(hierarchy_names)) != len(hierarchy_names):
+            raise SemanticError("Semantic hierarchy names must be unique.")
+        known_dimensions = set(dimension_names)
+        for hierarchy in hierarchies:
+            unknown = [
+                level for level in hierarchy.levels if level not in known_dimensions
+            ]
+            if unknown:
+                raise SemanticError(
+                    f"Hierarchy {hierarchy.name!r} references unknown dimensions: "
+                    + ", ".join(unknown)
+                    + "."
+                )
+        object.__setattr__(self, "hierarchies", hierarchies)
+
         default = self.default_table
         if default is not None:
             default = _identifier(default, "default_table")
@@ -341,6 +408,12 @@ class SemanticModel:
             if item.name == name:
                 return item
         raise KeyError(f"Unknown semantic measure {name!r}.")
+
+    def hierarchy(self, name: str) -> SemanticHierarchy:
+        for item in self.hierarchies:
+            if item.name == name:
+                return item
+        raise KeyError(f"Unknown semantic hierarchy {name!r}.")
 
     def relationship_tables(self) -> dict[str, set[str]]:
         """Undirected adjacency between tables, used by the join planner."""
@@ -461,6 +534,7 @@ class SemanticModel:
             "relationships": [item.to_dict() for item in self.relationships],
             "dimensions": [item.to_dict() for item in self.dimensions],
             "measures": [item.to_dict() for item in self.measures],
+            "hierarchies": [item.to_dict() for item in self.hierarchies],
         }
 
     @classmethod
@@ -482,6 +556,10 @@ class SemanticModel:
             ),
             measures=tuple(
                 SemanticMeasure.from_dict(item) for item in payload.get("measures", [])
+            ),
+            hierarchies=tuple(
+                SemanticHierarchy.from_dict(item)
+                for item in payload.get("hierarchies", [])
             ),
             default_table=payload.get("default_table"),
             schema_version=str(
@@ -621,6 +699,7 @@ __all__ = [
     "Relationship",
     "SemanticDimension",
     "SemanticError",
+    "SemanticHierarchy",
     "SemanticMeasure",
     "SemanticModel",
     "SemanticTable",

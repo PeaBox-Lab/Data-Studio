@@ -818,6 +818,8 @@ def create_app(
         *,
         theme: str = "light",
         selections: dict[str, Any] | None = None,
+        filters: list[Any] | None = None,
+        drill: dict[str, Any] | None = None,
     ) -> Any:
         body = payload or {}
         dashboard = dashboard_store().get(dashboard_id)
@@ -825,6 +827,8 @@ def create_app(
         return DashboardRenderer(engine).render(
             dashboard,
             selections=selections or body.get("selections") or {},
+            filters=filters if filters is not None else body.get("filters") or (),
+            drill=drill if drill is not None else body.get("drill") or {},
             theme=theme,
         )
 
@@ -836,7 +840,19 @@ def create_app(
         theme = body.get("theme") or "light"
         if theme not in ("light", "dark"):
             raise ValueError("Dashboard theme must be 'light' or 'dark'.")
-        return render_dashboard(dashboard_id, body, theme=theme).to_dict()
+        filters = body.get("filters")
+        if filters is not None and not isinstance(filters, list):
+            raise ValueError("Dashboard 'filters' must be a list.")
+        drill = body.get("drill")
+        if drill is not None and not isinstance(drill, dict):
+            raise ValueError("Dashboard 'drill' must be an object keyed by tile id.")
+        return render_dashboard(
+            dashboard_id,
+            body,
+            theme=theme,
+            filters=filters,
+            drill=drill,
+        ).to_dict()
 
     @app.get(
         "/api/v1/dashboards/{dashboard_id}/report",
@@ -847,20 +863,37 @@ def create_app(
         dashboard_id: str,
         theme: str = Query("light"),
         selections: str | None = Query(None),
+        filters: str | None = Query(None),
+        drill: str | None = Query(None),
     ) -> HTMLResponse:
         if theme not in ("light", "dark"):
             raise ValueError("Dashboard theme must be 'light' or 'dark'.")
-        chosen: dict[str, Any] = {}
-        if selections:
+
+        def _json_query(value: str | None, label: str) -> Any:
+            if not value:
+                return None
             try:
-                parsed = json.loads(selections)
+                parsed = json.loads(value)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"'selections' is not valid JSON: {exc}") from exc
-            if not isinstance(parsed, dict):
-                raise ValueError("'selections' must be a JSON object.")
-            chosen = parsed
+                raise ValueError(f"{label!r} is not valid JSON: {exc}") from exc
+            return parsed
+
+        chosen = _json_query(selections, "selections") or {}
+        if not isinstance(chosen, dict):
+            raise ValueError("'selections' must be a JSON object.")
+        cross = _json_query(filters, "filters") or []
+        if not isinstance(cross, list):
+            raise ValueError("'filters' must be a JSON array.")
+        states = _json_query(drill, "drill") or {}
+        if not isinstance(states, dict):
+            raise ValueError("'drill' must be a JSON object.")
         view = render_dashboard(
-            dashboard_id, {}, theme=theme, selections=chosen
+            dashboard_id,
+            {},
+            theme=theme,
+            selections=chosen,
+            filters=cross,
+            drill=states,
         )
         return HTMLResponse(
             render_dashboard_html(view, theme=theme)

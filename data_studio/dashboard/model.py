@@ -118,6 +118,7 @@ class DashboardTile:
     subtitle: str = ""
     width: int = 1
     table_style: str = "plain"
+    hierarchy: str | None = None
 
     def __post_init__(self) -> None:
         identifier = str(self.id).strip()
@@ -164,6 +165,20 @@ class DashboardTile:
             raise DashboardError("Only table tiles can use a table style.")
         object.__setattr__(self, "table_style", table_style)
 
+        hierarchy = self.hierarchy
+        if hierarchy is not None:
+            hierarchy = str(hierarchy).strip()
+            if not hierarchy:
+                hierarchy = None
+            elif kind != "chart":
+                raise DashboardError("Only chart tiles can use a hierarchy.")
+            elif dimensions:
+                raise DashboardError(
+                    "A chart tile with a hierarchy draws its dimensions from the "
+                    "hierarchy; leave dimensions empty."
+                )
+        object.__setattr__(self, "hierarchy", hierarchy)
+
         if kind == "kpi":
             if len(measures) != 1:
                 raise DashboardError("A KPI tile needs exactly one measure.")
@@ -172,8 +187,10 @@ class DashboardTile:
         elif kind == "chart":
             if not measures:
                 raise DashboardError("A chart tile needs at least one measure.")
-            if not dimensions:
-                raise DashboardError("A chart tile needs at least one dimension.")
+            if not dimensions and hierarchy is None:
+                raise DashboardError(
+                    "A chart tile needs at least one dimension or a hierarchy."
+                )
         elif not dimensions and not measures:
             raise DashboardError("A table tile needs a dimension or a measure.")
 
@@ -191,6 +208,7 @@ class DashboardTile:
             "subtitle": self.subtitle,
             "width": self.width,
             "table_style": self.table_style,
+            "hierarchy": self.hierarchy,
         }
 
     @classmethod
@@ -208,6 +226,7 @@ class DashboardTile:
             subtitle=str(payload.get("subtitle", "")),
             width=payload.get("width", 1),
             table_style=str(payload.get("table_style", "plain")),
+            hierarchy=payload.get("hierarchy"),
         )
 
 
@@ -427,6 +446,7 @@ def validate_dashboard(dashboard: Dashboard, model: Any | None) -> list[str]:
 
     dimensions = {item.name for item in model.dimensions}
     measures = {item.name for item in model.measures}
+    hierarchies = {item.name: item for item in model.hierarchies}
     for slicer in dashboard.slicers:
         if slicer.dimension not in dimensions:
             problems.append(
@@ -446,8 +466,17 @@ def validate_dashboard(dashboard: Dashboard, model: Any | None) -> list[str]:
                 problems.append(
                     f"Tile {tile.id!r} filters on unknown field {item.field!r}."
                 )
+        output_fields = tile.dimensions + tile.measures
+        if tile.hierarchy:
+            hierarchy = hierarchies.get(tile.hierarchy)
+            if hierarchy is None:
+                problems.append(
+                    f"Tile {tile.id!r} uses unknown hierarchy {tile.hierarchy!r}."
+                )
+            else:
+                output_fields = hierarchy.levels + tile.measures
         for order in tile.order_by:
-            if order.field not in tile.dimensions + tile.measures:
+            if order.field not in output_fields:
                 problems.append(
                     f"Tile {tile.id!r} orders by {order.field!r}, which is not in the "
                     "tile output."

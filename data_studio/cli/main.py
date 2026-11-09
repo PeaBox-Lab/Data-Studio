@@ -974,15 +974,32 @@ def _parse_selection(value: str) -> tuple[str, list[Any]]:
     return key, [_coerce(item.strip()) for item in raw.split(",")]
 
 
+def _parse_dashboard_filters(values: list[str] | None) -> list[QueryFilter]:
+    filters: list[QueryFilter] = []
+    for item in values or []:
+        field, _, raw = item.partition("=")
+        field = field.strip()
+        if not field:
+            raise ValueError("--filter needs FIELD=VALUE.")
+        filters.append(QueryFilter(field, "=", _coerce(raw.strip())))
+    return filters
+
+
 def _cmd_dashboard_render(args: argparse.Namespace) -> int:
     try:
         selections = dict(_parse_selection(item) for item in (args.select or []))
+        cross_filters = _parse_dashboard_filters(args.filter)
         with _open(args) as project:
             model = SemanticModelStore(project).get()
             dashboard = DashboardStore(project).get(args.dashboard_id)
             view = DashboardRenderer(
                 SemanticEngine(project, model, use_pipeline=not args.raw)
-            ).render(dashboard, selections=selections, theme=args.theme)
+            ).render(
+                dashboard,
+                selections=selections,
+                filters=cross_filters,
+                theme=args.theme,
+            )
             if args.json:
                 _print_json(view.to_dict())
                 return 0
@@ -1023,12 +1040,18 @@ def _cmd_dashboard_render(args: argparse.Namespace) -> int:
 def _cmd_dashboard_report(args: argparse.Namespace) -> int:
     try:
         selections = dict(_parse_selection(item) for item in (args.select or []))
+        cross_filters = _parse_dashboard_filters(args.filter)
         with _open(args) as project:
             model = SemanticModelStore(project).get()
             dashboard = DashboardStore(project).get(args.dashboard_id)
             view = DashboardRenderer(
                 SemanticEngine(project, model, use_pipeline=not args.raw)
-            ).render(dashboard, selections=selections, theme=args.theme)
+            ).render(
+                dashboard,
+                selections=selections,
+                filters=cross_filters,
+                theme=args.theme,
+            )
             destination = args.destination or f"reports/dashboard-{dashboard.id}.html"
             path = Path(destination)
             if not path.is_absolute():
@@ -1416,6 +1439,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Slicer selection, for example: --select region=North.",
     )
     dashboard_render.add_argument(
+        "--filter",
+        action="append",
+        metavar="FIELD=VALUE",
+        help="Cross-filter every tile, for example: --filter region=North.",
+    )
+    dashboard_render.add_argument(
         "--theme",
         choices=("light", "dark"),
         default="light",
@@ -1452,6 +1481,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="SLICER=VALUE",
         help="Slicer selection, for example: --select region=North.",
+    )
+    dashboard_report.add_argument(
+        "--filter",
+        action="append",
+        metavar="FIELD=VALUE",
+        help="Cross-filter every tile, for example: --filter region=North.",
     )
     dashboard_report.add_argument(
         "--theme",

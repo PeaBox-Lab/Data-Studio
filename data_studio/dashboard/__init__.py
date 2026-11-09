@@ -13,7 +13,12 @@ from .model import (
     slugify,
     validate_dashboard,
 )
-from .render import DashboardRenderer, DashboardTileView, DashboardView
+from .render import (
+    DashboardDrill,
+    DashboardRenderer,
+    DashboardTileView,
+    DashboardView,
+)
 from .report import render_dashboard_html, write_dashboard_report
 from .store import DashboardStore
 
@@ -24,6 +29,7 @@ __all__ = [
     "TILE_KINDS",
     "Dashboard",
     "DashboardBookmark",
+    "DashboardDrill",
     "DashboardError",
     "DashboardRenderer",
     "DashboardSlicer",

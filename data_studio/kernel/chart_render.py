@@ -69,6 +69,14 @@ def _escape(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def _value_attr(value: Any) -> str:
+    """Tag a mark with its category when it can drive a dashboard cross-filter."""
+
+    if not isinstance(value, str) or not value:
+        return ""
+    return f' data-ds-value="{_escape(value)}"'
+
+
 def _number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -500,9 +508,11 @@ def _categorical_bars(
             value = _number(row.get(value_field))
             if value is None:
                 continue
-            category = _label(row.get(category_field))
+            raw_category = row.get(category_field)
+            category = _label(raw_category)
             if category not in categories:
                 continue
+            value_attr = _value_attr(raw_category)
             position = categories.index(category)
             if horizontal:
                 y = top + position * band + (band - group_width) / 2 + index * bar_width
@@ -514,7 +524,7 @@ def _categorical_bars(
                 parts.append(
                     f'<rect x="{min(x, _map(0.0, value_lo, value_hi, left, right)):g}" '
                     f'y="{y:g}" width="{width_value:g}" height="{max(1.0, bar_width - 2):g}" '
-                    f'rx="2" fill="{color}"><title>{_escape(category)}: '
+                    f'rx="2" fill="{color}"{value_attr}><title>{_escape(category)}: '
                     f"{_fmt(value)}</title></rect>"
                 )
             else:
@@ -527,7 +537,7 @@ def _categorical_bars(
                 parts.append(
                     f'<rect x="{x:g}" y="{min(y, _map(0.0, value_lo, value_hi, bottom, top)):g}" '
                     f'width="{max(1.0, bar_width - 2):g}" height="{height_value:g}" '
-                    f'rx="2" fill="{color}"><title>{_escape(category)}: '
+                    f'rx="2" fill="{color}"{value_attr}><title>{_escape(category)}: '
                     f"{_fmt(value)}</title></rect>"
                 )
 
@@ -897,21 +907,29 @@ def _pie(
     if not label_field or not value_field:
         raise ChartRenderError("A pie chart needs a category and a value field.")
     slices = [
-        (_label(row.get(label_field)), _number(row.get(value_field)))
+        (
+            _label(row.get(label_field)),
+            _number(row.get(value_field)),
+            row.get(label_field),
+        )
         for row in records
     ]
-    slices = [(name, value) for name, value in slices if value is not None and value > 0]
+    slices = [
+        (name, value, raw)
+        for name, value, raw in slices
+        if value is not None and value > 0
+    ]
     if not slices:
         _empty(parts, width, height, theme)
         return
-    total = sum(value for _, value in slices)  # type: ignore[misc]
+    total = sum(value for _, value, _ in slices)  # type: ignore[misc]
     cx = (width - 150) / 2 + 10
     cy = height / 2 + 8
     radius = min(cy - 30, cx - 30, 120)
     inner = radius * 0.56 if donut else 0.0
     angle = -math.pi / 2
     entries: list[tuple[str, str]] = []
-    for index, (name, value) in enumerate(slices):
+    for index, (name, value, raw) in enumerate(slices):
         color = _palette(index)
         entries.append((name, color))
         sweep = 2 * math.pi * float(value) / total
@@ -938,7 +956,7 @@ def _pie(
         percentage = 100.0 * float(value) / total
         parts.append(
             f'<path d="{path}" fill="{color}" stroke="{theme["background"]}" '
-            f'stroke-width="2"><title>{_escape(name)}: {_fmt(value)} '
+            f'stroke-width="2"{_value_attr(raw)}><title>{_escape(name)}: {_fmt(value)} '
             f"({percentage:.1f}%)</title></path>"
         )
         angle = end
@@ -966,27 +984,33 @@ def _waterfall(
     if not value_field:
         raise ChartRenderError("A waterfall chart needs a value field.")
     steps = [
-        (_label(row.get(category_field)), _number(row.get(value_field)))
+        (
+            _label(row.get(category_field)),
+            _number(row.get(value_field)),
+            row.get(category_field),
+        )
         for row in records
     ]
-    steps = [(name, value) for name, value in steps if value is not None]
+    steps = [
+        (name, value, raw) for name, value, raw in steps if value is not None
+    ]
     if not steps:
         _empty(parts, width, height, theme)
         return
     cumulative = 0.0
-    levels: list[tuple[str, float, float, float | None]] = []
-    for name, value in steps:  # type: ignore[misc]
+    levels: list[tuple[str, float, float, float | None, Any]] = []
+    for name, value, raw in steps:  # type: ignore[misc]
         start = cumulative
         cumulative += float(value)
-        levels.append((name, start, cumulative, float(value)))
-    values = [0.0, cumulative] + [value for _, value in steps]  # type: ignore[misc]
+        levels.append((name, start, cumulative, float(value), raw))
+    values = [0.0, cumulative] + [value for _, value, _ in steps]  # type: ignore[misc]
     y_lo, y_hi = _domain(values, zero=True)
     _value_axis(
         parts, left=left, right=right, top=top, bottom=bottom, lo=y_lo, hi=y_hi, theme=theme
     )
     band = (right - left) / max(1, len(levels))
     bar_width = min(56.0, band * 0.62)
-    for index, (name, start, end, delta) in enumerate(levels):
+    for index, (name, start, end, delta, raw) in enumerate(levels):
         center = left + index * band + band / 2
         y_start = _map(start, y_lo, y_hi, bottom, top)
         y_end = _map(end, y_lo, y_hi, bottom, top)
@@ -995,8 +1019,8 @@ def _waterfall(
         color = POSITIVE_COLOR if (delta is None or delta >= 0) else NEGATIVE_COLOR
         parts.append(
             f'<rect x="{center - bar_width / 2:g}" y="{y:g}" width="{bar_width:g}" '
-            f'height="{height_value:g}" rx="2" fill="{color}" fill-opacity="0.85">'
-            f"<title>{_escape(name)}: {_fmt(delta)}</title></rect>"
+            f'height="{height_value:g}" rx="2" fill="{color}" fill-opacity="0.85"'
+            f'{_value_attr(raw)}><title>{_escape(name)}: {_fmt(delta)}</title></rect>'
         )
         parts.append(
             _text(
