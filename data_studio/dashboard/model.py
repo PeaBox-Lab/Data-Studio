@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..kernel.spec import ChartType
@@ -18,6 +18,7 @@ from ..semantic.engine import QueryFilter, QueryOrder
 
 DASHBOARD_SCHEMA_VERSION = "1"
 TILE_KINDS = ("chart", "kpi", "table")
+TABLE_STYLES = ("plain", "data_bars", "heatmap")
 GRID_WIDTHS = (1, 2, 3, 4)
 _DASHBOARD_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _TILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
@@ -86,6 +87,21 @@ def _orders(values: Sequence[Any]) -> tuple[QueryOrder, ...]:
     return tuple(parsed)
 
 
+def _bookmark_values(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        values: tuple[Any, ...] = (value,)
+    else:
+        values = tuple(value)
+    for item in values:
+        if item is not None and not isinstance(item, (str, int, float, bool)):
+            raise DashboardError(
+                "Bookmark selection values must be text, numbers, booleans or null."
+            )
+    return values
+
+
 @dataclass(frozen=True, slots=True)
 class DashboardTile:
     """One KPI, chart or table on a dashboard."""
@@ -101,6 +117,7 @@ class DashboardTile:
     limit: int | None = None
     subtitle: str = ""
     width: int = 1
+    table_style: str = "plain"
 
     def __post_init__(self) -> None:
         identifier = str(self.id).strip()
@@ -138,6 +155,14 @@ class DashboardTile:
                 f"Tile width must be one of: {', '.join(map(str, GRID_WIDTHS))}."
             )
         object.__setattr__(self, "width", width)
+        table_style = str(self.table_style or "plain").strip().lower()
+        if table_style not in TABLE_STYLES:
+            raise DashboardError(
+                "Table style must be one of: " + ", ".join(TABLE_STYLES) + "."
+            )
+        if table_style != "plain" and kind != "table":
+            raise DashboardError("Only table tiles can use a table style.")
+        object.__setattr__(self, "table_style", table_style)
 
         if kind == "kpi":
             if len(measures) != 1:
@@ -165,6 +190,7 @@ class DashboardTile:
             "limit": self.limit,
             "subtitle": self.subtitle,
             "width": self.width,
+            "table_style": self.table_style,
         }
 
     @classmethod
@@ -181,6 +207,7 @@ class DashboardTile:
             limit=payload.get("limit"),
             subtitle=str(payload.get("subtitle", "")),
             width=payload.get("width", 1),
+            table_style=str(payload.get("table_style", "plain")),
         )
 
 
@@ -226,6 +253,52 @@ class DashboardSlicer:
 
 
 @dataclass(frozen=True, slots=True)
+class DashboardBookmark:
+    """A named set of slicer selections that can be restored later."""
+
+    id: str
+    title: str
+    selections: Mapping[str, tuple[Any, ...]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        identifier = str(self.id).strip()
+        if not _TILE_ID.match(identifier):
+            raise DashboardError(
+                "Bookmark id must be 1-64 lowercase letters, digits, '_' or '-' and "
+                "start with a letter or digit."
+            )
+        object.__setattr__(self, "id", identifier)
+        object.__setattr__(self, "title", _required_text(self.title, "Bookmark title"))
+        raw = self.selections or {}
+        if not isinstance(raw, Mapping):
+            raise DashboardError("Bookmark selections must be an object.")
+        cleaned: dict[str, tuple[Any, ...]] = {}
+        for key, value in raw.items():
+            name = str(key).strip()
+            if not name:
+                raise DashboardError("Bookmark selection ids must not be empty.")
+            cleaned[name] = _bookmark_values(value)
+        object.__setattr__(self, "selections", cleaned)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "selections": {
+                key: list(values) for key, values in self.selections.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> DashboardBookmark:
+        return cls(
+            id=str(payload.get("id", "")),
+            title=str(payload.get("title", "")),
+            selections=payload.get("selections") or {},
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Dashboard:
     """A named collection of tiles and slicers."""
 
@@ -234,6 +307,7 @@ class Dashboard:
     description: str = ""
     tiles: tuple[DashboardTile, ...] = ()
     slicers: tuple[DashboardSlicer, ...] = ()
+    bookmarks: tuple[DashboardBookmark, ...] = ()
     created_at: str = ""
     updated_at: str = ""
     schema_version: str = DASHBOARD_SCHEMA_VERSION
@@ -268,6 +342,25 @@ class Dashboard:
             raise DashboardError("A dimension can appear in only one dashboard slicer.")
         object.__setattr__(self, "slicers", slicers)
 
+        bookmarks = tuple(self.bookmarks)
+        if any(not isinstance(item, DashboardBookmark) for item in bookmarks):
+            raise DashboardError(
+                "Dashboard bookmarks must be DashboardBookmark instances."
+            )
+        bookmark_ids = [item.id for item in bookmarks]
+        if len(set(bookmark_ids)) != len(bookmark_ids):
+            raise DashboardError("Dashboard bookmark ids must be unique.")
+        slicer_ids = set(slicer_ids)
+        for bookmark in bookmarks:
+            unknown = sorted(set(bookmark.selections) - slicer_ids)
+            if unknown:
+                raise DashboardError(
+                    f"Bookmark {bookmark.id!r} uses unknown slicer(s): "
+                    + ", ".join(unknown)
+                    + "."
+                )
+        object.__setattr__(self, "bookmarks", bookmarks)
+
         for name in ("created_at", "updated_at"):
             if not isinstance(getattr(self, name), str):
                 raise DashboardError(f"Dashboard {name} must be a string.")
@@ -282,6 +375,7 @@ class Dashboard:
             "description": self.description,
             "tiles": [tile.to_dict() for tile in self.tiles],
             "slicers": [slicer.to_dict() for slicer in self.slicers],
+            "bookmarks": [bookmark.to_dict() for bookmark in self.bookmarks],
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -309,6 +403,12 @@ class Dashboard:
                 if isinstance(item, DashboardSlicer)
                 else DashboardSlicer.from_dict(item)
                 for item in payload.get("slicers", ())
+            ),
+            bookmarks=tuple(
+                item
+                if isinstance(item, DashboardBookmark)
+                else DashboardBookmark.from_dict(item)
+                for item in payload.get("bookmarks", ())
             ),
             created_at=str(payload.get("created_at", "")),
             updated_at=str(payload.get("updated_at", "")),
@@ -358,8 +458,10 @@ def validate_dashboard(dashboard: Dashboard, model: Any | None) -> list[str]:
 __all__ = [
     "DASHBOARD_SCHEMA_VERSION",
     "GRID_WIDTHS",
+    "TABLE_STYLES",
     "TILE_KINDS",
     "Dashboard",
+    "DashboardBookmark",
     "DashboardError",
     "DashboardSlicer",
     "DashboardTile",

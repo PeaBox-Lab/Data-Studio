@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -15,10 +16,12 @@ from typing import Any
 from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext
 from ..analysis.saved import SCHEDULES, SavedAnalysisStore
 from ..dashboard import (
+    DashboardBookmark,
     DashboardRenderer,
     DashboardSlicer,
     DashboardStore,
     DashboardTile,
+    slugify,
     write_dashboard_report,
 )
 from ..engine.duckdb_engine import EngineError
@@ -880,6 +883,14 @@ def _cmd_dashboard_show(args: argparse.Namespace) -> int:
                         f"    {slicer.id:<20} {slicer.dimension:<24} "
                         f"{'multi' if slicer.multi else 'single'}"
                     )
+            if dashboard.bookmarks:
+                print("  views")
+                for bookmark in dashboard.bookmarks:
+                    detail = ", ".join(
+                        f"{key}={','.join(str(value) for value in values)}"
+                        for key, values in bookmark.selections.items()
+                    )
+                    print(f"    {bookmark.id:<20} {bookmark.title:<24} {detail or 'all data'}")
             if dashboard.tiles:
                 print("  tiles")
                 for tile in dashboard.tiles:
@@ -897,21 +908,33 @@ def _cmd_dashboard_save(args: argparse.Namespace) -> int:
     try:
         tiles_raw = _read_json(args.tiles) or []
         slicers_raw = _read_json(args.slicers) or []
+        bookmarks_raw = _read_json(args.bookmarks) if args.bookmarks else None
         if not isinstance(tiles_raw, list):
             raise ValueError("--tiles must be a JSON list.")
         if not isinstance(slicers_raw, list):
             raise ValueError("--slicers must be a JSON list.")
+        if bookmarks_raw is not None and not isinstance(bookmarks_raw, list):
+            raise ValueError("--bookmarks must be a JSON list.")
         tiles = tuple(DashboardTile.from_dict(item) for item in tiles_raw)
         slicers = tuple(
             DashboardSlicer.from_dict(item) for item in slicers_raw
         )
+        bookmarks = tuple(
+            DashboardBookmark.from_dict(item) for item in (bookmarks_raw or [])
+        )
         with _open(args) as project:
             model = SemanticModelStore(project).load()
-            dashboard = DashboardStore(project).create(
+            store = DashboardStore(project)
+            if bookmarks_raw is None and args.overwrite:
+                target = args.dashboard_id or slugify(args.title)
+                with contextlib.suppress(KeyError):
+                    bookmarks = store.get(target).bookmarks
+            dashboard = store.create(
                 title=args.title,
                 description=args.description or "",
                 tiles=tiles,
                 slicers=slicers,
+                bookmarks=bookmarks,
                 dashboard_id=args.dashboard_id,
                 model=model,
                 overwrite=args.overwrite,
@@ -922,6 +945,7 @@ def _cmd_dashboard_save(args: argparse.Namespace) -> int:
             print(f"Saved dashboard {dashboard.title!r} as {dashboard.id}")
             print(f"  tiles    {len(dashboard.tiles)}")
             print(f"  slicers  {len(dashboard.slicers)}")
+            print(f"  views    {len(dashboard.bookmarks)}")
         return 0
     except _ERRORS as exc:
         return _fail(exc)
@@ -1362,6 +1386,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     dashboard_save.add_argument(
         "--slicers", help="Slicers as a JSON list, @file or - for stdin."
+    )
+    dashboard_save.add_argument(
+        "--bookmarks", help="Saved views as a JSON list, @file or - for stdin."
     )
     dashboard_save.add_argument(
         "--overwrite", action="store_true", help="Replace an existing dashboard id."

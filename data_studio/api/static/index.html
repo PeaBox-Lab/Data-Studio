@@ -352,6 +352,8 @@
   .dash-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .dash-toolbar .spacer { margin-left: auto; }
   .dash-toolbar select { width: auto; min-width: 112px; }
+  .dash-toolbar #bookmarkSelect { min-width: 180px; max-width: 300px; }
+  .dash-toolbar .muted-inline { font-size: 11px; color: var(--muted); }
   .slicer-bar { display: flex; flex-wrap: wrap; gap: 10px; }
   .slicer-group { border: 1px solid var(--line); border-radius: 11px; background: var(--panel); padding: 8px 10px; min-width: 170px; max-width: 330px; }
   .slicer-head { display: flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
@@ -372,6 +374,9 @@
   }
   .dash-tile-head h3 { margin: 0; font-size: 13.5px; letter-spacing: -.01em; }
   .dash-tile-head .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .dash-tile-head { display: flex; align-items: flex-start; gap: 8px; }
+  .dash-tile-head > div { min-width: 0; }
+  .dash-tile-head .tile-export { margin-left: auto; flex: 0 0 auto; }
   .dash-tile svg { display: block; width: 100%; height: auto; }
   .dash-kpi { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 2px; }
   .dash-kpi .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
@@ -415,6 +420,19 @@
   .busy { position: fixed; inset: 0; background: rgba(15, 23, 42, .2); z-index: 110; display: grid; place-items: center; }
   .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .5); border-top-color: var(--accent); animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* print: hide chrome and print the dashboard canvas */
+  @media print {
+    .sidebar, .topbar, .project-banner, .dash-side, #dashStatus,
+    .dash-toolbar, .card-head .actions, .toasts, .busy { display: none !important; }
+    .app { display: block; }
+    .content { padding: 0; }
+    body { background: #fff; }
+    .card { border: 0; box-shadow: none; }
+    .card-body { padding: 0; }
+    .dash-canvas { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+    .dash-tile { break-inside: avoid; box-shadow: none; }
+  }
 
   @media (max-width: 1080px) {
     .panel-grid, .data-grid, .analyze-grid, .dash-layout { grid-template-columns: 1fr; }
@@ -713,11 +731,20 @@
                   </select>
                   <button class="btn sm" id="editDashboard" data-tip="Edit this dashboard's tiles and slicers" disabled>Edit</button>
                   <button class="btn sm" id="downloadDashboard" data-tip="Download a self-contained HTML report with the current slicer filters" disabled>Download HTML</button>
+                  <button class="btn sm" id="printDashboard" data-tip="Print this dashboard, or use the browser print dialog to save it as a PDF" disabled>Print / PDF</button>
                   <button class="btn sm danger" id="deleteDashboard" data-tip="Delete this dashboard definition" disabled>Delete</button>
                 </div>
               </div>
               <div class="card-body">
                 <p class="status" id="dashStatus"></p>
+                <div class="dash-toolbar" id="bookmarkBar" style="margin-bottom:10px">
+                  <select id="bookmarkSelect" aria-label="Saved view" data-tip="Restore a saved combination of slicer values">
+                    <option value="">All data</option>
+                  </select>
+                  <button class="btn sm" id="saveBookmark" data-tip="Save the current slicer selections as a named view" disabled>Save view</button>
+                  <button class="btn sm ghost" id="deleteBookmark" data-tip="Delete the selected saved view" disabled>Delete view</button>
+                  <span class="muted-inline" id="bookmarkHint">Views restore slicer selections; tiles and exports follow the active view.</span>
+                </div>
                 <div id="slicerBar" class="slicer-bar"></div>
                 <div id="dashboardCanvas" class="dash-canvas">
                   <p class="dash-empty">Open a project, derive a semantic model, then create a dashboard.</p>
@@ -966,6 +993,7 @@ const state = {
   dashboardTheme: localStorage.getItem("dataStudio.dashboardTheme") || "light",
   slicerSelections: {},
   slicerValues: {},
+  activeBookmark: "",
   dashboardRequest: 0,
   autoRefresh: localStorage.getItem("dataStudio.autoRefresh") !== "false",
   collapsedCategories: new Set(),
@@ -2260,6 +2288,8 @@ function setQuickExport(format) {
 /* -- dashboards --------------------------------------------------------- */
 const CHART_TYPES = ["column", "bar", "line", "area", "scatter", "histogram", "box", "heatmap", "pie", "donut", "waterfall"];
 const TILE_KINDS = ["chart", "kpi", "table"];
+const TABLE_STYLES = ["plain", "data_bars", "heatmap"];
+const TABLE_STYLE_LABELS = { plain: "Plain", data_bars: "Data bars", heatmap: "Heatmap" };
 
 function currentDashboard() {
   return state.dashboards.find((item) => item.id === state.selectedDashboard) || null;
@@ -2314,6 +2344,7 @@ async function refreshDashboards({ quiet = false } = {}) {
     state.dashboardView = null;
     state.slicerSelections = {};
     state.slicerValues = {};
+    state.activeBookmark = "";
     renderDashboardList();
     renderDashboardCanvas();
     return;
@@ -2332,6 +2363,7 @@ async function refreshDashboards({ quiet = false } = {}) {
     state.selectedDashboard = ids[0] || null;
     state.slicerSelections = {};
     state.slicerValues = {};
+    state.activeBookmark = "";
     state.dashboardView = null;
     state.dashboardRequest += 1;
   }
@@ -2494,6 +2526,7 @@ async function selectDashboard(id) {
   state.selectedDashboard = id;
   state.slicerSelections = {};
   state.slicerValues = {};
+  state.activeBookmark = "";
   state.dashboardView = null;
   state.dashboardRequest += 1;
   renderDashboardList();
@@ -2571,6 +2604,7 @@ function renderSlicerBar(dashboard) {
 
 function setSlicerValues(id, values) {
   state.slicerSelections[id] = values;
+  state.activeBookmark = "";
   renderDashboardCanvas();
   renderDashboardTiles({ quiet: true });
 }
@@ -2584,8 +2618,111 @@ function toggleSlicerValue(id, value, multi) {
       ? current.filter((item) => item !== value)
       : [...current, value];
   }
+  state.activeBookmark = "";
   renderDashboardCanvas();
   renderDashboardTiles({ quiet: true });
+}
+
+function applyBookmark(id) {
+  const dashboard = currentDashboard();
+  if (!dashboard) return;
+  if (!id) {
+    state.activeBookmark = "";
+    state.slicerSelections = {};
+  } else {
+    const bookmark = (dashboard.bookmarks || []).find((item) => item.id === id);
+    if (!bookmark) return;
+    state.activeBookmark = id;
+    const selections = {};
+    for (const [slicerId, values] of Object.entries(bookmark.selections || {})) {
+      selections[slicerId] = Array.isArray(values) ? values : [values];
+    }
+    state.slicerSelections = selections;
+  }
+  renderDashboardCanvas();
+  renderDashboardTiles({ quiet: true });
+}
+
+function renderBookmarkBar(dashboard) {
+  const select = document.getElementById("bookmarkSelect");
+  const save = document.getElementById("saveBookmark");
+  const remove = document.getElementById("deleteBookmark");
+  if (!select) return;
+  const bookmarks = (dashboard && dashboard.bookmarks) || [];
+  if (!bookmarks.some((item) => item.id === state.activeBookmark)) {
+    state.activeBookmark = "";
+  }
+  const custom = !state.activeBookmark
+    && Object.values(state.slicerSelections).some((values) => values && values.length);
+  select.replaceChildren();
+  select.append(el("option", {
+    value: "",
+    text: custom ? "Custom selection" : "All data"
+  }));
+  for (const bookmark of bookmarks) {
+    const option = el("option", { value: bookmark.id, text: bookmark.title });
+    if (bookmark.id === state.activeBookmark) option.selected = true;
+    select.append(option);
+  }
+  select.value = state.activeBookmark;
+  select.disabled = !dashboard;
+  if (save) save.disabled = !dashboard || !state.model;
+  if (remove) remove.disabled = !dashboard || !state.activeBookmark;
+}
+
+function replaceDashboardInState(dashboard) {
+  if (!dashboard) return;
+  const index = state.dashboards.findIndex((item) => item.id === dashboard.id);
+  if (index >= 0) state.dashboards[index] = dashboard;
+  else state.dashboards.push(dashboard);
+}
+
+async function saveBookmark() {
+  const dashboard = currentDashboard();
+  if (!dashboard) return;
+  const suggested = `View ${new Date().toLocaleDateString()}`;
+  const title = window.prompt("Name this view", suggested);
+  if (title === null) return;
+  if (!title.trim()) {
+    toast("Enter a view name.", "error");
+    return;
+  }
+  const payload = await task(
+    () => api(`/api/v1/dashboards/${encodeURIComponent(dashboard.id)}/bookmarks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: title.trim(), selections: activeSlicerSelections() })
+    }),
+    "dashStatus",
+    "View saved."
+  );
+  if (!payload) return;
+  replaceDashboardInState(payload.dashboard);
+  state.activeBookmark = payload.bookmark.id;
+  renderDashboardList();
+  renderDashboardCanvas();
+  toast(`Saved view “${payload.bookmark.title}”.`, "success");
+}
+
+async function deleteBookmark() {
+  const dashboard = currentDashboard();
+  if (!dashboard || !state.activeBookmark) return;
+  const bookmark = (dashboard.bookmarks || []).find((item) => item.id === state.activeBookmark);
+  if (!bookmark) return;
+  if (!window.confirm(`Delete saved view '${bookmark.title}'?`)) return;
+  const saved = await task(
+    () => api(`/api/v1/dashboards/${encodeURIComponent(dashboard.id)}/bookmarks/${encodeURIComponent(bookmark.id)}`, {
+      method: "DELETE"
+    }),
+    "dashStatus",
+    "View deleted."
+  );
+  if (!saved) return;
+  replaceDashboardInState(saved);
+  state.activeBookmark = "";
+  renderDashboardList();
+  renderDashboardCanvas();
+  toast(`Removed view “${bookmark.title}”.`, "success");
 }
 
 function renderDashboardCanvas() {
@@ -2595,10 +2732,11 @@ function renderDashboardCanvas() {
   heading.textContent = dashboard ? dashboard.title : "No dashboard selected";
   const theme = document.getElementById("dashboardTheme");
   if (theme) theme.value = state.dashboardTheme;
-  for (const id of ["editDashboard", "downloadDashboard", "deleteDashboard"]) {
+  for (const id of ["editDashboard", "downloadDashboard", "printDashboard", "deleteDashboard"]) {
     const node = document.getElementById(id);
     if (node) node.disabled = !dashboard;
   }
+  renderBookmarkBar(dashboard);
   renderSlicerBar(dashboard);
 
   const canvas = document.getElementById("dashboardCanvas");
@@ -2634,7 +2772,19 @@ function renderDashboardTile(tileView) {
   const subtitle = tile.subtitle
     ? el("div", { class: "meta", text: tile.subtitle })
     : el("div", { class: "meta", text: [...(tile.dimensions || []), ...(tile.measures || [])].join(", ") || "—" });
-  card.append(el("div", { class: "dash-tile-head" }, el("h3", { text: tile.title || tile.id }), subtitle));
+  const head = el("div", { class: "dash-tile-head" },
+    el("div", {}, el("h3", { text: tile.title || tile.id }), subtitle));
+  if (tile.kind === "chart" && tileView.svg) {
+    const png = el("button", {
+      type: "button",
+      class: "btn sm ghost tile-export",
+      text: "PNG",
+      "data-tip": "Download this chart as a PNG image"
+    });
+    png.addEventListener("click", () => downloadTilePng(tileView, card));
+    head.append(png);
+  }
+  card.append(head);
 
   if (tileView.error) {
     card.append(el("div", { class: "diagnostic error" },
@@ -2664,11 +2814,25 @@ function renderDashboardTile(tileView) {
     card.append(holder);
     return card;
   }
-  card.append(buildResultTable(result));
+  card.append(buildResultTable(result, tileView.percentages || [], tile.table_style || "plain"));
   return card;
 }
 
-function buildResultTable(result) {
+function tableCellStyle(style, percentage) {
+  if (style === "plain" || percentage === null || percentage === undefined) return "";
+  const value = Math.max(0, Math.min(1, Number(percentage)));
+  if (!Number.isFinite(value)) return "";
+  if (style === "data_bars") {
+    const percent = (value * 100).toFixed(1);
+    return `background:linear-gradient(90deg, rgba(37,99,235,.18) ${percent}%, transparent ${percent}%)`;
+  }
+  if (style === "heatmap") {
+    return `background:rgba(37,99,235,${(0.05 + 0.35 * value).toFixed(3)})`;
+  }
+  return "";
+}
+
+function buildResultTable(result, percentages = [], style = "plain") {
   const wrap = el("div", { class: "table-wrap" });
   if (!result.columns || !result.columns.length) {
     wrap.append(el("p", { class: "empty", text: "No columns." }));
@@ -2683,20 +2847,71 @@ function buildResultTable(result) {
   if (!result.rows || !result.rows.length) {
     body.append(el("tr", {}, el("td", { colspan: String(result.columns.length), class: "empty", text: "No rows." })));
   } else {
-    for (const row of result.rows) {
+    result.rows.forEach((row, rowIndex) => {
       const tr = el("tr");
-      for (const column of result.columns) {
+      result.columns.forEach((column, columnIndex) => {
         const numeric = column.kind === "measure";
-        tr.append(el("td", { class: numeric ? "num" : "" }, numeric
+        const rowPercentages = percentages[rowIndex] || [];
+        const cellStyle = numeric ? tableCellStyle(style, rowPercentages[columnIndex]) : "";
+        tr.append(el("td", { class: numeric ? "num" : "", style: cellStyle || null }, numeric
           ? formatMeasure(row[column.name], column.format)
           : formatCell(row[column.name])));
-      }
+      });
       body.append(tr);
-    }
+    });
   }
   table.append(head, body);
   wrap.append(table);
   return wrap;
+}
+
+function downloadTilePng(tileView, card) {
+  const svg = card.querySelector("svg");
+  if (!svg) {
+    toast("This chart is not ready to export.", "error");
+    return;
+  }
+  const clone = svg.cloneNode(true);
+  const box = (clone.getAttribute("viewBox") || "").trim().split(/\s+/).map(Number);
+  const width = box.length === 4 && box[2] > 0 ? box[2] : 640;
+  const height = box.length === 4 && box[3] > 0 ? box[3] : 360;
+  clone.setAttribute("width", String(width));
+  clone.setAttribute("height", String(height));
+  clone.removeAttribute("style");
+  const source = new XMLSerializer().serializeToString(clone);
+  const svgUrl = URL.createObjectURL(new Blob([source], { type: "image/svg+xml;charset=utf-8" }));
+  const image = new Image();
+  image.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = state.dashboardTheme === "dark" ? "#0f172a" : "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(svgUrl);
+    canvas.toBlob((png) => {
+      if (!png) {
+        toast("Could not export this chart.", "error");
+        return;
+      }
+      const pngUrl = URL.createObjectURL(png);
+      const link = document.createElement("a");
+      link.href = pngUrl;
+      link.download = `${(currentDashboard() || {}).id || "dashboard"}-${(tileView.tile || {}).id || "chart"}.png`;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(pngUrl), 1000);
+      toast("Chart image downloaded.", "success");
+    }, "image/png");
+  };
+  image.onerror = () => {
+    URL.revokeObjectURL(svgUrl);
+    toast("Could not render this chart as an image.", "error");
+  };
+  image.src = svgUrl;
 }
 
 async function renderDashboardTiles({ quiet = false } = {}) {
@@ -2731,6 +2946,7 @@ async function removeDashboard() {
     state.dashboardView = null;
     state.slicerSelections = {};
     state.slicerValues = {};
+    state.activeBookmark = "";
     await refreshDashboards({ quiet: true });
     return true;
   }, "dashStatus", "Dashboard deleted.");
@@ -2864,6 +3080,34 @@ function buildTileRow(tile) {
   const dimensions = multiSelectControl(state.model.dimensions, base.dimensions || []);
   const measures = multiSelectControl(state.model.measures, base.measures || []);
   const subtitle = el("input", { value: base.subtitle || "", placeholder: "Optional subtitle" });
+  const order = el("select");
+  const direction = selectControl(["asc", "desc"], (base.order_by && base.order_by[0] && base.order_by[0].direction) || "desc", {
+    asc: "Ascending", desc: "Descending"
+  });
+  const limit = el("input", {
+    type: "number", min: "1", step: "1", value: base.limit || "", placeholder: "All rows"
+  });
+  const tableStyle = selectControl(TABLE_STYLES, base.table_style || "plain", TABLE_STYLE_LABELS);
+
+  const syncOrderOptions = () => {
+    const previous = order.value;
+    const fields = [...selectedValues(dimensions), ...selectedValues(measures)];
+    order.replaceChildren(el("option", { value: "", text: "Model order" }));
+    for (const field of fields) order.append(el("option", { value: field, text: field }));
+    order.value = fields.includes(previous) ? previous : "";
+  };
+  dimensions.addEventListener("change", syncOrderOptions);
+  measures.addEventListener("change", syncOrderOptions);
+  syncOrderOptions();
+  if (base.order_by && base.order_by[0]) order.value = base.order_by[0].field;
+
+  const syncKind = () => {
+    const isTable = kind.value === "table";
+    tableStyle.disabled = !isTable;
+    if (!isTable) tableStyle.value = "plain";
+  };
+  kind.addEventListener("change", syncKind);
+  syncKind();
 
   row.append(el("div", { class: "form-grid" },
     formField("Title", title),
@@ -2872,21 +3116,29 @@ function buildTileRow(tile) {
     formField("Width", width),
     formField("Dimensions", dimensions, "Hold Ctrl to select several; KPI tiles need none."),
     formField("Measures", measures, "Charts and KPIs need at least one; KPI tiles need exactly one."),
-    formField("Subtitle", subtitle)
+    formField("Subtitle", subtitle),
+    formField("Sort by", order, "Optional: order rows or categories by one of this tile's fields."),
+    formField("Direction", direction),
+    formField("Top N", limit, "Optional row cap. Leave blank for all rows."),
+    formField("Table style", tableStyle, "Conditional formatting for table tiles only.")
   ));
 
-  row._collect = () => ({
-    title: title.value.trim(),
-    kind: kind.value,
-    chart: chart.value,
-    width: Number(width.value),
-    dimensions: selectedValues(dimensions),
-    measures: selectedValues(measures),
-    subtitle: subtitle.value.trim(),
-    filters: base.filters || [],
-    order_by: base.order_by || [],
-    limit: base.limit === undefined ? null : base.limit
-  });
+  row._collect = () => {
+    const orderField = order.value;
+    return {
+      title: title.value.trim(),
+      kind: kind.value,
+      chart: chart.value,
+      width: Number(width.value),
+      dimensions: selectedValues(dimensions),
+      measures: selectedValues(measures),
+      subtitle: subtitle.value.trim(),
+      filters: base.filters || [],
+      order_by: orderField ? [{ field: orderField, direction: direction.value }] : [],
+      limit: limit.value ? Number(limit.value) : null,
+      table_style: kind.value === "table" ? tableStyle.value : "plain"
+    };
+  };
   return row;
 }
 
@@ -2979,6 +3231,15 @@ async function submitDashboard(event) {
     overwrite: true
   };
   const existing = state.dashboardDraft;
+  const draft = existing ? state.dashboards.find((item) => item.id === existing) : null;
+  if (draft) {
+    const slicerIds = new Set(slicers.map((item) => item.id));
+    payload.bookmarks = (draft.bookmarks || []).filter((bookmark) =>
+      Object.keys(bookmark.selections || {}).every((id) => slicerIds.has(id)));
+    if (payload.bookmarks.length !== (draft.bookmarks || []).length) {
+      toast("Removed saved views that referenced deleted slicers.");
+    }
+  }
   const saved = await task(
     () => existing
       ? api(`/api/v1/dashboards/${encodeURIComponent(existing)}`, {
@@ -2999,6 +3260,7 @@ async function submitDashboard(event) {
   state.selectedDashboard = saved.id;
   state.slicerSelections = {};
   state.slicerValues = {};
+  state.activeBookmark = "";
   state.dashboardView = null;
   await refreshDashboards({ quiet: true });
   if (state.view !== "dashboards") navigate("dashboards");
@@ -3196,6 +3458,14 @@ function bindEvents() {
   });
   document.getElementById("deleteDashboard").addEventListener("click", removeDashboard);
   document.getElementById("downloadDashboard").addEventListener("click", downloadDashboardReport);
+  document.getElementById("printDashboard").addEventListener("click", () => {
+    if (currentDashboard()) window.print();
+  });
+  document.getElementById("bookmarkSelect").addEventListener("change", (event) => {
+    applyBookmark(event.target.value);
+  });
+  document.getElementById("saveBookmark").addEventListener("click", saveBookmark);
+  document.getElementById("deleteBookmark").addEventListener("click", deleteBookmark);
   document.getElementById("refreshDashboards").addEventListener("click", () => task(async () => {
     await refreshModel({ quiet: true });
     await refreshDashboards({ quiet: true });

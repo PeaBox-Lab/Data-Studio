@@ -199,3 +199,90 @@ def test_dashboard_rejects_unknown_measure(
     )
     assert response.status_code == 400
     assert "unknown measure" in response.json()["detail"]
+
+
+def test_dashboard_bookmarks_and_table_styles(
+    client: TestClient, tmp_path: Path
+) -> None:
+    prepare(client, tmp_path / "Demo")
+    assert client.put("/api/v1/model", json={"model": derived_model(client)}).status_code == 200
+    created = client.post(
+        "/api/v1/dashboards",
+        json={
+            "title": "Sales dashboard",
+            "tiles": [
+                {
+                    "id": "detail",
+                    "title": "Detail",
+                    "kind": "table",
+                    "dimensions": ["region"],
+                    "measures": ["total_amount"],
+                    "order_by": [{"field": "total_amount", "direction": "desc"}],
+                    "limit": 2,
+                    "table_style": "data_bars",
+                }
+            ],
+            "slicers": [{"id": "region", "dimension": "region"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    dashboard = created.json()
+    assert dashboard["tiles"][0]["table_style"] == "data_bars"
+    assert dashboard["tiles"][0]["limit"] == 2
+    assert dashboard["bookmarks"] == []
+
+    rendered = client.post(
+        "/api/v1/dashboards/sales-dashboard/render",
+        json={"use_pipeline": False},
+    )
+    assert rendered.status_code == 200, rendered.text
+    tile = rendered.json()["tiles"][0]
+    assert [row["region"] for row in tile["result"]["rows"]] == ["North", "South"]
+    assert tile["percentages"][0][1] == pytest.approx(1.0)
+    assert tile["percentages"][1][1] == pytest.approx(0.0)
+
+    report = client.get("/api/v1/dashboards/sales-dashboard/report")
+    assert report.status_code == 200
+    assert "linear-gradient(90deg" in report.text
+    assert "@media print" in report.text
+
+    bookmark = client.post(
+        "/api/v1/dashboards/sales-dashboard/bookmarks",
+        json={"title": "North only", "selections": {"region": ["North"]}},
+    )
+    assert bookmark.status_code == 201, bookmark.text
+    payload = bookmark.json()
+    assert payload["bookmark"]["id"] == "north-only"
+    assert payload["bookmark"]["selections"] == {"region": ["North"]}
+    assert payload["dashboard"]["bookmarks"][0]["id"] == "north-only"
+
+    duplicate = client.post(
+        "/api/v1/dashboards/sales-dashboard/bookmarks",
+        json={"title": "North only", "selections": {"region": ["South"]}},
+    )
+    assert duplicate.status_code == 201, duplicate.text
+    assert duplicate.json()["bookmark"]["id"] == "north-only-2"
+
+    reloaded = client.get("/api/v1/dashboards/sales-dashboard").json()
+    assert [item["id"] for item in reloaded["bookmarks"]] == [
+        "north-only",
+        "north-only-2",
+    ]
+
+    unknown = client.post(
+        "/api/v1/dashboards/sales-dashboard/bookmarks",
+        json={"title": "Bad", "selections": {"nope": ["x"]}},
+    )
+    assert unknown.status_code == 400
+
+    removed = client.delete(
+        "/api/v1/dashboards/sales-dashboard/bookmarks/north-only"
+    )
+    assert removed.status_code == 200, removed.text
+    assert [item["id"] for item in removed.json()["bookmarks"]] == ["north-only-2"]
+    assert (
+        client.delete(
+            "/api/v1/dashboards/sales-dashboard/bookmarks/north-only"
+        ).status_code
+        == 404
+    )

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from contextlib import suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,13 @@ from ..analysis.saved import (
 )
 from ..dashboard import (
     Dashboard,
+    DashboardBookmark,
     DashboardRenderer,
     DashboardSlicer,
     DashboardStore,
     DashboardTile,
     render_dashboard_html,
+    slugify,
     write_dashboard_report,
 )
 from ..engine.duckdb_engine import EngineError
@@ -717,11 +720,16 @@ def create_app(
                 DashboardSlicer.from_dict(item)
                 for item in payload.get("slicers", ())
             )
+            bookmarks = tuple(
+                DashboardBookmark.from_dict(item)
+                for item in payload.get("bookmarks", ())
+            )
             saved = store.create(
                 title=str(payload.get("title", "")),
                 description=str(payload.get("description", "")),
                 tiles=tiles,
                 slicers=slicers,
+                bookmarks=bookmarks,
                 model=model,
                 overwrite=overwrite,
             )
@@ -748,6 +756,61 @@ def create_app(
     def delete_dashboard(dashboard_id: str) -> dict[str, str]:
         dashboard_store().remove(dashboard_id)
         return {"removed": dashboard_id}
+
+    @app.post(
+        "/api/v1/dashboards/{dashboard_id}/bookmarks",
+        status_code=201,
+        tags=["dashboards"],
+    )
+    def create_dashboard_bookmark(
+        dashboard_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A bookmark object is required.")
+        title = str(payload.get("title", "")).strip()
+        if not title:
+            raise ValueError("Bookmark title must not be empty.")
+        selections = payload.get("selections") or {}
+        if not isinstance(selections, dict):
+            raise ValueError("Bookmark selections must be an object.")
+        store = dashboard_store()
+        dashboard = store.get(dashboard_id)
+        base = slugify(title)
+        used = {item.id for item in dashboard.bookmarks}
+        identifier = base
+        counter = 2
+        while identifier in used:
+            suffix = f"-{counter}"
+            identifier = f"{base[: 64 - len(suffix)]}{suffix}"
+            counter += 1
+        bookmark = DashboardBookmark(identifier, title, selections)
+        saved = store.save(
+            replace(dashboard, bookmarks=(*dashboard.bookmarks, bookmark)),
+            model=model_store().load(),
+            overwrite=True,
+        )
+        return {"bookmark": bookmark.to_dict(), "dashboard": saved.to_dict()}
+
+    @app.delete(
+        "/api/v1/dashboards/{dashboard_id}/bookmarks/{bookmark_id}",
+        tags=["dashboards"],
+    )
+    def delete_dashboard_bookmark(
+        dashboard_id: str, bookmark_id: str
+    ) -> dict[str, Any]:
+        store = dashboard_store()
+        dashboard = store.get(dashboard_id)
+        remaining = tuple(
+            item for item in dashboard.bookmarks if item.id != bookmark_id
+        )
+        if len(remaining) == len(dashboard.bookmarks):
+            raise KeyError(f"Bookmark {bookmark_id!r} does not exist.")
+        saved = store.save(
+            replace(dashboard, bookmarks=remaining),
+            model=model_store().load(),
+            overwrite=True,
+        )
+        return saved.to_dict()
 
     def render_dashboard(
         dashboard_id: str,

@@ -49,6 +49,10 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 svg { max-width: 100%; height: auto; }
 footer { color: #8a93a2; font-size: 11px; padding: 0 34px 28px; }
 @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+@media print {
+  body { background: #fff; }
+  .tile { break-inside: avoid; box-shadow: none; }
+}
 """
 
 
@@ -77,6 +81,22 @@ def _format(value: Any, fmt: str = "number") -> str:
         except (TypeError, ValueError):
             return _text(value)
     return _text(value)
+
+
+def _cell_style(style: str, percentage: float | None) -> str:
+    if percentage is None or style == "plain":
+        return ""
+    value = max(0.0, min(1.0, float(percentage)))
+    if style == "data_bars":
+        percent = value * 100
+        return (
+            "background:linear-gradient(90deg,"
+            f"rgba(37,99,235,.18) {percent:.1f}%, transparent {percent:.1f}%);"
+        )
+    if style == "heatmap":
+        alpha = 0.05 + 0.35 * value
+        return f"background:rgba(37,99,235,{alpha:.3f});"
+    return ""
 
 
 def _tile_html(tile_view: DashboardTileView) -> str:
@@ -110,13 +130,21 @@ def _tile_html(tile_view: DashboardTileView) -> str:
     else:
         header = "".join(f"<th>{_text(column.title)}</th>" for column in result.columns)
         rows = []
-        for row in result.rows:
+        style = tile.table_style
+        for row_index, row in enumerate(result.rows):
             cells = []
-            for column in result.columns:
+            for column_index, column in enumerate(result.columns):
                 value = row.get(column.name)
                 numeric = isinstance(value, (int, float)) and not isinstance(value, bool)
+                percentage = None
+                if row_index < len(tile_view.percentages):
+                    row_percentages = tile_view.percentages[row_index]
+                    if column_index < len(row_percentages):
+                        percentage = row_percentages[column_index]
+                css = _cell_style(style, percentage)
+                attribute = f' style="{css}"' if css else ""
                 cells.append(
-                    f'<td class="{"num" if numeric else ""}">'
+                    f'<td class="{"num" if numeric else ""}"{attribute}>'
                     f"{_format(value, column.format)}</td>"
                 )
             rows.append("<tr>" + "".join(cells) + "</tr>")

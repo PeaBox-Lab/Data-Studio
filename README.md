@@ -7,8 +7,9 @@ R, SAS, Tableau and Power BI.
 **Current status:** Phase 0 (foundation), Phase 1 (kernel MVP), Phase 2A (typed
 descriptive analytics), Phase 2B (inference and regression), Phase 2C (time series,
 chart rendering and HTML reports), Phase 2D (saved analyses, fingerprint
-invalidation, scheduled refresh and report artifacts) and Phase 3A (semantic model,
-safe measure DSL, live dashboards with slicers and dashboard HTML export) are
+invalidation, scheduled refresh and report artifacts), Phase 3A (semantic model,
+safe measure DSL, live dashboards with slicers and dashboard HTML export) and Phase 3B
+(tile sorting and top-N, table data bars/heatmaps, saved views and print/PNG export) are
 implemented. The new package can
 import CSV/Excel/JSON/Parquet/DuckDB files, run an ordered, validated pipeline with
 incremental reruns and undo, profile and summarise the result, run hypothesis tests,
@@ -18,7 +19,7 @@ results with freshness tracking, derive a star-schema semantic model, compose li
 from typed dimensions and measures, and reopen a project reproducibly. The browser workspace
 has a light/dark theme, a grouped and searchable analysis catalog, contextual help, a
 Saved view for freshness, schedules and report downloads, and a Dashboards view with
-shared slicers and one-click HTML export. v0.38 remains a frozen desktop
+shared slicers, saved bookmark views and one-click HTML export. v0.38 remains a frozen desktop
 prototype kept runnable as a reference. See
 [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) for the review, gap analysis and phased plan.
 
@@ -215,14 +216,21 @@ data-studio dashboard-save .\examples\demo `
   --tiles '[{"id":"total","title":"Total revenue","kind":"kpi","measures":["total_amount"]},
             {"id":"by-region","title":"Revenue by region","kind":"chart",
              "dimensions":["region"],"measures":["total_amount"],"chart":"column"}]' `
-  --slicers '[{"id":"region","dimension":"region"}]'
+  --slicers '[{"id":"region","dimension":"region"}]' `
+  --bookmarks '[{"id":"north","title":"North only","selections":{"region":["North"]}}]'
 data-studio dashboard-render .\examples\demo sales-performance --select region=North
 data-studio dashboard-report .\examples\demo sales-performance --select region=North
 ```
 
 The workspace **Dashboards** view derives the model, composes KPI/chart/table tiles, applies
 shared slicer chips to every tile, and downloads the current view as a self-contained HTML
-report. The same operations are available over HTTP:
+report. Phase 3B adds presentation controls: tiles can sort and cap rows (`order_by`,
+`limit`), table tiles can render data bars or a heatmap from server-normalised percentages,
+and dashboards store named saved views (`bookmarks`) that restore slicer selections. The
+workspace prints the canvas through the browser print dialog (save as PDF) and exports each
+chart as a PNG; the HTML report carries the same conditional formatting and print styles.
+
+The same operations are available over HTTP:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -235,6 +243,8 @@ report. The same operations are available over HTTP:
 | `GET` / `POST` | `/api/v1/dashboards` | List or create dashboards. |
 | `GET` / `PUT` / `DELETE` | `/api/v1/dashboards/{id}` | Read, replace or delete one dashboard. |
 | `POST` | `/api/v1/dashboards/{id}/render` | Render tiles with slicer selections. |
+| `POST` | `/api/v1/dashboards/{id}/bookmarks` | Save a named slicer selection set. |
+| `DELETE` | `/api/v1/dashboards/{id}/bookmarks/{bookmark_id}` | Delete a saved view. |
 | `GET` / `POST` | `/api/v1/dashboards/{id}/report` | Download HTML, or write it under `reports/`. |
 
 ## Run the legacy prototype

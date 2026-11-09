@@ -4,7 +4,7 @@
 **Goal reviewed against:** a single platform for data modification, cleaning, processing, statistics, visualization and reporting — comparable in intent to SAS, R, Tableau, Power BI and Excel.
 **Review type:** static code review + measured inventory + quality-gate run.
 
-**Implementation status (updated):** Phase 0, Phase 1, Phase 2A–2D and Phase 3A are
+**Implementation status (updated):** Phase 0, Phase 1, Phase 2A–2D, Phase 3A and Phase 3B are
 complete. The new package has the kernel contracts, DuckDB engine, project format, 31-step
 registry, CLI, FastAPI surface and a redesigned browser workspace. Phase 2A added the
 analysis registry and five typed descriptive analyses. Phase 2B added seven inference and
@@ -13,8 +13,9 @@ regression analyses (`t_test`, `anova`, `chi_square`, `proportion_test`, `pairwi
 checks, effect sizes, confidence intervals and multiple-comparison corrections. Phase 2C–2D
 added SVG charts, self-contained HTML reports, saved analyses with fingerprint invalidation,
 scheduled refresh and report artifacts. Phase 3A added the semantic model, the safe measure
-DSL, live dashboards with shared slicers and dashboard HTML export. The suite stands at 526
-tests plus the frozen v0.38 gate.
+DSL, live dashboards with shared slicers and dashboard HTML export. Phase 3B added tile
+sorting and top-N, table data bars/heatmaps, saved views (bookmarks) and print/PNG export. The
+suite stands at 534 tests plus the frozen v0.38 gate.
 
 ---
 
@@ -443,25 +444,29 @@ render the same numbers.
 
 ### Phase 3 — Semantic model and dashboards (6–8 weeks)
 
-**Status: Phase 3A implemented; 3B–3D remain.** A project now owns one semantic model at
+**Status: Phase 3A and 3B implemented; 3C–3D remain.** A project now owns one semantic model at
 `models/semantic.json` (tables, relationships, typed dimensions and measures) and dashboard
 documents under `dashboards/<id>.json`. Measures use a safe DSL (`sum(amount)`,
 `sum(amount) / count()`, `sum(units) where region = 'North'`) that compiles to quoted DuckDB
 SQL; project JSON never carries raw SQL. The workspace **Dashboards** view derives a starter
 model, composes KPI/chart/table tiles on a 12-column grid, applies shared slicers to every
-tile, and downloads a self-contained HTML report. The same operations exist in the CLI
-(`model-*`, `query`, `dashboard-*`) and the HTTP API. Unqualified ambiguous columns are
-rejected, and a tile that cannot join a slicer dimension reports its own error rather than
-failing the dashboard.
+tile, and downloads a self-contained HTML report. Tiles can sort and cap rows; table tiles can
+render data bars or heatmaps from server-normalised percentages; named saved views restore
+slicer selections; the canvas prints to PDF and charts export to PNG. The same operations
+exist in the CLI (`model-*`, `query`, `dashboard-*`) and the HTTP API. Unqualified ambiguous
+columns are rejected, and a tile that cannot join a slicer dimension reports its own error
+rather than failing the dashboard.
 
 - [x] Star-schema model: tables, relationships, typed measures.
 - [x] Safe measure DSL with `where` predicates and qualified column references.
 - [x] Dashboard documents: KPI, chart and table tiles; shared slicers; 12-column grid.
 - [x] Live re-query on render; slicer selections flow into every tile query.
 - [x] Self-contained dashboard HTML export.
+- [x] Top-N and sorting; conditional table formatting (data bars, heatmap).
+- [x] Saved views (bookmarks) and print/PDF plus per-chart PNG export.
 - [ ] Hierarchies, date table and time-intelligence measures (year-over-year, running total).
-- [ ] Cross-highlight, drill-down, tooltips, top-N and conditional formatting.
-- [ ] Parameters, bookmarks and PDF/PNG export.
+- [ ] Cross-highlight, drill-down and tile tooltips.
+- [ ] Parameters and interactive tile controls.
 - [ ] Scheduled refresh of dashboards alongside saved analyses.
 
 **Done when:** a dashboard can be built without code, filtered interactively, refreshed on a schedule, and exported as a report.

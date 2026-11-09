@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.44.0.dev0"
+__version__ = "0.45.0.dev0"
 API_VERSION = "v1"
 PROJECT_FORMAT_VERSION = "1.0"
 RESULT_SCHEMA_VERSION = "1"

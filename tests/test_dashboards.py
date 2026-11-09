@@ -8,6 +8,7 @@ import pytest
 
 from data_studio.dashboard import (
     Dashboard,
+    DashboardBookmark,
     DashboardError,
     DashboardRenderer,
     DashboardSlicer,
@@ -209,3 +210,164 @@ def test_report_is_self_contained(project: Project, model: SemanticModel) -> Non
     path = write_dashboard_report(view, project.root / "reports" / "dash.html")
     assert path.is_file()
     assert path.read_text(encoding="utf-8") == html
+
+
+def test_table_style_validation_and_round_trip() -> None:
+    tile = DashboardTile(
+        "detail",
+        "Detail",
+        kind="table",
+        dimensions=("region",),
+        measures=("total_amount",),
+        table_style="data_bars",
+    )
+    assert tile.to_dict()["table_style"] == "data_bars"
+    assert DashboardTile.from_dict(tile.to_dict()).table_style == "data_bars"
+    with pytest.raises(DashboardError):
+        DashboardTile(
+            "detail", "Detail", kind="table", dimensions=("region",),
+            table_style="sparkles",
+        )
+    with pytest.raises(DashboardError):
+        DashboardTile(
+            "chart",
+            "Chart",
+            kind="chart",
+            dimensions=("region",),
+            measures=("total_amount",),
+            table_style="heatmap",
+        )
+
+
+def test_bookmark_validation_and_round_trip() -> None:
+    bookmark = DashboardBookmark("north", "North only", {"region": ("North",)})
+    assert bookmark.to_dict() == {
+        "id": "north",
+        "title": "North only",
+        "selections": {"region": ["North"]},
+    }
+    restored = DashboardBookmark.from_dict(bookmark.to_dict())
+    assert restored.selections == {"region": ("North",)}
+
+    with pytest.raises(DashboardError):
+        DashboardBookmark("Bad ID", "Title", {})
+    with pytest.raises(DashboardError):
+        DashboardBookmark("north", "", {})
+    with pytest.raises(DashboardError):
+        DashboardBookmark("north", "Title", {"region": (["nested"],)})
+
+
+def test_dashboard_bookmark_references() -> None:
+    dashboard = Dashboard(
+        id="views",
+        title="Views",
+        slicers=(DashboardSlicer("region", "region"),),
+        bookmarks=(DashboardBookmark("north", "North", {"region": ("North",)}),),
+    )
+    assert dashboard.to_dict()["bookmarks"][0]["id"] == "north"
+    with pytest.raises(DashboardError):
+        Dashboard(
+            id="views",
+            title="Views",
+            slicers=(DashboardSlicer("region", "region"),),
+            bookmarks=(DashboardBookmark("north", "North", {"manager": ("Ana",)}),),
+        )
+    with pytest.raises(DashboardError):
+        Dashboard(
+            id="views",
+            title="Views",
+            slicers=(DashboardSlicer("region", "region"),),
+            bookmarks=(
+                DashboardBookmark("north", "North", {}),
+                DashboardBookmark("north", "Again", {}),
+            ),
+        )
+
+
+def test_store_round_trips_bookmarks(project: Project, model: SemanticModel) -> None:
+    store = DashboardStore(project)
+    dashboard = store.create(
+        title="Views",
+        tiles=sample_dashboard().tiles,
+        slicers=sample_dashboard().slicers,
+        bookmarks=(DashboardBookmark("north", "North only", {"region": ["North"]}),),
+        model=model,
+    )
+    stored = store.get(dashboard.id)
+    assert stored.bookmarks[0].title == "North only"
+    assert stored.bookmarks[0].selections == {"region": ("North",)}
+
+
+def test_styled_table_percentages(project: Project, model: SemanticModel) -> None:
+    dashboard = Dashboard(
+        id="styled",
+        title="Styled",
+        tiles=(
+            DashboardTile(
+                "detail",
+                "Detail",
+                kind="table",
+                dimensions=("region",),
+                measures=("total_amount", "units"),
+                order_by=("total_amount desc",),
+                limit=2,
+                table_style="data_bars",
+            ),
+        ),
+    )
+    view = DashboardRenderer(
+        SemanticEngine(project, model, use_pipeline=False)
+    ).render(dashboard)
+    tile = view.tiles[0]
+    assert [row["region"] for row in tile.result.rows] == ["North", "South"]
+    assert len(tile.percentages) == 2
+    assert tile.percentages[0][0] is None
+    assert tile.percentages[0][1] == pytest.approx(1.0)
+    assert tile.percentages[0][2] == pytest.approx(1.0)
+    assert tile.percentages[1][1] == pytest.approx(0.0)
+    assert tile.percentages[1][2] == pytest.approx(0.0)
+
+    plain = DashboardRenderer(
+        SemanticEngine(project, model, use_pipeline=False)
+    ).render(
+        Dashboard(
+            id="plain",
+            title="Plain",
+            tiles=(
+                DashboardTile(
+                    "detail",
+                    "Detail",
+                    kind="table",
+                    dimensions=("region",),
+                    measures=("total_amount",),
+                    table_style="plain",
+                ),
+            ),
+        )
+    )
+    assert plain.tiles[0].percentages == ()
+    assert plain.tiles[0].to_dict()["percentages"] == []
+
+
+def test_report_conditional_formatting(project: Project, model: SemanticModel) -> None:
+    dashboard = Dashboard(
+        id="styled",
+        title="Styled",
+        tiles=(
+            DashboardTile(
+                "detail",
+                "Detail",
+                kind="table",
+                dimensions=("region",),
+                measures=("total_amount",),
+                table_style="heatmap",
+            ),
+        ),
+    )
+    view = DashboardRenderer(
+        SemanticEngine(project, model, use_pipeline=False)
+    ).render(dashboard)
+    html = render_dashboard_html(view)
+    assert "rgba(37,99,235" in html
+    assert "@media print" in html
+

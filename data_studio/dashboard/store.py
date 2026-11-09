@@ -19,6 +19,7 @@ from ..kernel.provenance import utc_now_iso
 from ..project.manifest import safe_project_path
 from .model import (
     Dashboard,
+    DashboardBookmark,
     DashboardError,
     DashboardSlicer,
     DashboardTile,
@@ -143,6 +144,7 @@ class DashboardStore:
             description=dashboard.description,
             tiles=dashboard.tiles,
             slicers=dashboard.slicers,
+            bookmarks=dashboard.bookmarks,
             created_at=created,
             updated_at=now,
             schema_version=dashboard.schema_version,
@@ -160,6 +162,7 @@ class DashboardStore:
         title: str,
         tiles: Sequence[DashboardTile] = (),
         slicers: Sequence[DashboardSlicer] = (),
+        bookmarks: Sequence[DashboardBookmark] = (),
         description: str = "",
         dashboard_id: str | None = None,
         model: SemanticModel | None = None,
@@ -179,6 +182,7 @@ class DashboardStore:
             description=description,
             tiles=tuple(tiles),
             slicers=tuple(slicers),
+            bookmarks=tuple(bookmarks),
         )
         return self.save(dashboard, model=model, overwrite=overwrite)
 

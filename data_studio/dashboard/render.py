@@ -31,6 +31,7 @@ class DashboardTileView:
     result: SemanticResult | None = None
     svg: str | None = None
     error: str | None = None
+    percentages: tuple[tuple[float | None, ...], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +39,7 @@ class DashboardTileView:
             "result": self.result.to_dict() if self.result is not None else None,
             "svg": self.svg,
             "error": self.error,
+            "percentages": [list(row) for row in self.percentages],
         }
 
 
@@ -99,6 +101,46 @@ def _chart_spec(tile: DashboardTile, result: SemanticResult) -> ChartSpec | None
         data=result.rows,
         options={"subtitle": tile.subtitle} if tile.subtitle else {},
     )
+
+
+def _percentages(
+    result: SemanticResult,
+) -> tuple[tuple[float | None, ...], ...]:
+    """Normalise each numeric measure column to 0..1 for table formatting."""
+
+    ranges: dict[int, tuple[float, float]] = {}
+    for index, column in enumerate(result.columns):
+        if column.kind != "measure":
+            continue
+        values = [
+            float(row[column.name])
+            for row in result.rows
+            if isinstance(row.get(column.name), (int, float))
+            and not isinstance(row.get(column.name), bool)
+        ]
+        if values:
+            low, high = min(values), max(values)
+            ranges[index] = (low, high)
+    rows: list[tuple[float | None, ...]] = []
+    for row in result.rows:
+        cells: list[float | None] = []
+        for index, column in enumerate(result.columns):
+            value = row.get(column.name)
+            span = ranges.get(index)
+            if (
+                span is None
+                or not isinstance(value, (int, float))
+                or isinstance(value, bool)
+            ):
+                cells.append(None)
+                continue
+            low, high = span
+            if high <= low:
+                cells.append(1.0)
+            else:
+                cells.append(max(0.0, min(1.0, (float(value) - low) / (high - low))))
+        rows.append(tuple(cells))
+    return tuple(rows)
 
 
 class DashboardRenderer:
@@ -166,7 +208,17 @@ class DashboardRenderer:
                     if spec is not None
                     else None
                 )
-            return DashboardTileView(tile=tile, result=result, svg=svg)
+            percentages = (
+                _percentages(result)
+                if tile.kind == "table" and tile.table_style != "plain"
+                else ()
+            )
+            return DashboardTileView(
+                tile=tile,
+                result=result,
+                svg=svg,
+                percentages=percentages,
+            )
         except (SemanticError, MeasureError, KeyError, ValueError, TypeError) as exc:
             return DashboardTileView(tile=tile, error=str(exc))
 

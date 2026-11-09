@@ -125,3 +125,63 @@ def test_dashboard_commands(
         == 0
     )
     assert json.loads(capsys.readouterr().out) == {"removed": "sales-dashboard"}
+
+
+def test_dashboard_bookmarks_cli(
+    project_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli_main.main(["model-derive", str(project_root)]) == 0
+    capsys.readouterr()
+
+    tiles = json.dumps(
+        [
+            {"id": "detail", "title": "Detail", "kind": "table",
+             "dimensions": ["region"], "measures": ["total_amount"],
+             "order_by": [{"field": "total_amount", "direction": "desc"}],
+             "limit": 1, "table_style": "heatmap"},
+        ]
+    )
+    slicers = json.dumps([{"id": "region", "dimension": "region"}])
+    bookmarks = json.dumps(
+        [{"id": "north", "title": "North only", "selections": {"region": ["North"]}}]
+    )
+    args = [
+        "dashboard-save",
+        str(project_root),
+        "--title",
+        "Sales dashboard",
+        "--tiles",
+        tiles,
+        "--slicers",
+        slicers,
+        "--bookmarks",
+        bookmarks,
+    ]
+    assert cli_main.main([*args, "--overwrite"]) == 0
+    output = capsys.readouterr().out
+    assert "views    1" in output
+
+    assert cli_main.main(["dashboard-show", str(project_root), "sales-dashboard"]) == 0
+    shown = capsys.readouterr().out
+    assert "views" in shown
+    assert "North only" in shown
+
+    document = json.loads(
+        (project_root / "dashboards" / "sales-dashboard.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert document["bookmarks"][0]["id"] == "north"
+    assert document["tiles"][0]["table_style"] == "heatmap"
+    assert document["tiles"][0]["limit"] == 1
+
+    # Saving again without --bookmarks keeps the existing views.
+    assert cli_main.main([*args[:2], "--title", "Sales dashboard", "--tiles", tiles,
+                          "--slicers", slicers, "--overwrite"]) == 0
+    capsys.readouterr()
+    document = json.loads(
+        (project_root / "dashboards" / "sales-dashboard.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert [item["id"] for item in document["bookmarks"]] == ["north"]

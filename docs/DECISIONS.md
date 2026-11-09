@@ -471,6 +471,52 @@ surface. Storing pre-computed tile values would make dashboards stale and hide t
 
 ---
 
+## ADR-017: Dashboard presentation controls stay declarative and server-normalised
+
+**Status:** Accepted
+
+**Context.** Phase 3B adds controls users expect from BI tools: sort and top-N tiles, shade
+table cells by value, save a named set of slicer selections, and export a view for a
+presentation. These could be implemented as client-only state, but then the HTML report, the
+CLI and the workspace would drift; and storing rendered values would violate the rule that
+dashboards hold no data.
+
+**Decision.**
+
+- Tile sorting and row caps reuse the existing semantic query contract. A tile stores
+  `order_by` (field plus direction) and an optional `limit`; the engine still validates that
+  ordered fields are part of the tile output.
+- Conditional table formatting is a tile property, `table_style`, with three values:
+  `plain`, `data_bars` and `heatmap`. It is only valid for table tiles.
+- The renderer computes a per-tile `0..1` normalisation for each numeric measure column and
+  returns those percentages on `DashboardTileView`. The workspace draws CSS gradients and the
+  HTML report writes equivalent inline styles from the same numbers, so both render
+  identically without duplicating range logic in JavaScript.
+- Saved views are `DashboardBookmark` records inside the dashboard document. A bookmark holds
+  an id, a title and a mapping of slicer ids to scalar selections. It can only reference
+  slicers defined on the same dashboard, so a bookmark cannot bypass slicer validation.
+- The API exposes explicit bookmark create and delete endpoints. A dashboard `PUT` replaces
+  the document, so the workspace sends existing bookmarks back when it edits tiles; the CLI
+  `dashboard-save --overwrite` likewise preserves stored bookmarks when `--bookmarks` is
+  omitted.
+- PNG export is client-side: the inline SVG is serialised, drawn to a canvas at 2× and saved.
+  PDF export uses the browser print dialog with print CSS that hides workspace chrome. The
+  server stays free of an image or PDF dependency.
+
+**Consequences.**
+
+- Dashboard JSON remains a complete, reviewable description of the view; no rendered cells,
+  images or SQL are persisted.
+- Workspace and exported report formatting cannot diverge, because both consume the same
+  percentages.
+- Bookmarks are cheap to diff in version control but deliberately not live links to a
+  particular model version; they restore slicer values only.
+- PNG fidelity follows the SVG renderer and the browser canvas. Print layout is controlled by
+  CSS rather than a server-side PDF engine, which keeps the install small but leaves pagination
+  to the browser.
+
+---
+
 ## Open decisions
 
 These are deliberately deferred; record the answer here when it is made.

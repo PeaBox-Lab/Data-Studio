@@ -18,7 +18,7 @@ MyProject/
   steps/                # ordered pipeline definition: pipeline.json
     pipeline.json
   analyses/             # stored AnalysisResult documents (Phase 2)
-  dashboards/           # dashboard specifications (Phase 3A)
+  dashboards/           # dashboard specifications (Phase 3A–3B)
   models/               # semantic model: semantic.json (Phase 3A)
   reports/              # self-contained HTML reports (Phase 2C)
 ```
@@ -447,7 +447,8 @@ It stores no rows and no SQL; every tile is re-queried when the dashboard is ren
       "order_by": [],
       "limit": null,
       "subtitle": "",
-      "width": 1
+      "width": 1,
+      "table_style": "plain"
     },
     {
       "id": "by-region",
@@ -457,10 +458,24 @@ It stores no rows and no SQL; every tile is re-queried when the dashboard is ren
       "measures": ["total_amount"],
       "chart": "column",
       "width": 4
+    },
+    {
+      "id": "detail",
+      "title": "Region detail",
+      "kind": "table",
+      "dimensions": ["region"],
+      "measures": ["total_amount"],
+      "order_by": [{"field": "total_amount", "direction": "desc"}],
+      "limit": 10,
+      "table_style": "data_bars",
+      "width": 4
     }
   ],
   "slicers": [
     {"id": "region", "dimension": "region", "title": "Region", "multi": true}
+  ],
+  "bookmarks": [
+    {"id": "north-only", "title": "North only", "selections": {"region": ["North"]}}
   ],
   "created_at": "2026-11-09T09:00:00+00:00",
   "updated_at": "2026-11-09T09:05:00+00:00"
@@ -476,15 +491,23 @@ Rules:
   dimension or measure.
 - `width` is `1`–`4`; the workspace maps it to 3, 6, 9 or 12 columns of a 12-column grid.
 - `filters` use the same typed filter documents as semantic queries; `order_by` and `limit`
-  apply to the tile query.
+  apply to the tile query. `order_by` must name a field already in the tile output.
+- `table_style` is `plain`, `data_bars` or `heatmap` and is only valid for table tiles. The
+  renderer normalises each measure column to `0..1` per tile and returns those percentages
+  alongside the result so the workspace and the HTML report shade cells identically.
 - Every referenced dimension, measure and filter field must exist in the semantic model.
 - Slicer dimensions are unique and apply to every tile. A tile that cannot join a slicer's
   dimension returns its own error instead of failing the whole dashboard.
+- `bookmarks` are named saved views. Each id is unique, each title is non-empty, and each
+  `selections` key must be the id of a slicer on the same dashboard. Values are text, numbers,
+  booleans or null (lists are normalised to arrays in JSON). Bookmarks never store tile data.
 - Files are written atomically and listed in filename order. A corrupt document is reported
   and skipped so the remaining dashboards still load.
 
 Dashboard HTML reports (`reports/dashboard-<id>.html`) are self-contained: inline CSS,
 inline SVG and no scripts or external URLs. Slicer selections are applied before export.
+Table styles become inline cell backgrounds and the report includes print rules, so the
+browser's Save as PDF produces the same presentation as the workspace.
 
 ## What is not stored yet
 

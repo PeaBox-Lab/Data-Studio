@@ -3,8 +3,10 @@
 from .model import (
     DASHBOARD_SCHEMA_VERSION,
     GRID_WIDTHS,
+    TABLE_STYLES,
     TILE_KINDS,
     Dashboard,
+    DashboardBookmark,
     DashboardError,
     DashboardSlicer,
     DashboardTile,
@@ -18,8 +20,10 @@ from .store import DashboardStore
 __all__ = [
     "DASHBOARD_SCHEMA_VERSION",
     "GRID_WIDTHS",
+    "TABLE_STYLES",
     "TILE_KINDS",
     "Dashboard",
+    "DashboardBookmark",
     "DashboardError",
     "DashboardRenderer",
     "DashboardSlicer",
