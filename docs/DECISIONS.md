@@ -342,6 +342,85 @@ that installs with a single command on Windows.
 
 ---
 
+## ADR-014: Charts and reports render from the typed result, not a chart library
+
+**Status:** Accepted
+
+**Context.** Phase 2C must turn an `AnalysisResult` into charts and a shareable report. A
+JavaScript charting library would add a build step, a runtime download, and a second source
+of truth for colours, ticks and escaping. The result must render identically in the workspace
+API, the CLI and an offline HTML file, including on machines with no network access.
+
+**Decision.**
+
+- `ChartSpec` is the single contract. It gains an inline `data` field so the records a chart
+  needs travel with the specification instead of referring back to a table that may no longer
+  be in scope.
+- `data_studio.kernel.chart_render` is a pure-Python SVG renderer for all eleven `ChartType`
+  marks. It has no runtime dependency beyond the standard library, uses a fixed palette and
+  deterministic "nice" ticks, supports light and dark themes, and escapes every text value.
+- Both the chart API (`POST /api/v1/charts/render`) and the HTML exporter
+  (`data_studio.reporting`) call the same renderer, so a chart cannot drift between surfaces.
+- `render_html_report` embeds SVG, tables, metrics, diagnostics, narrative and provenance in
+  one document with inline CSS and no scripts or external assets.
+- Reports are written beneath the project's `reports/` directory. The path is validated with
+  `safe_project_path`, so a report cannot escape the project folder.
+- ARIMA is fitted by conditional sum of squares with NumPy/SciPy, matching the closed-form
+  OLS AR(1) answer. `statsmodels` and `pymannkendall` are development-only fixtures, not
+  runtime dependencies.
+
+**Consequences.**
+
+- A normal install stays small and `pip check` remains clean.
+- Charts are safe for untrusted cell values because all text is escaped at the renderer
+  boundary; only renderer-produced SVG is trusted markup.
+- The renderer is intentionally static. Interactivity (filters, cross-highlight, drill) is a
+  Phase 3 concern and can be added as another renderer over the same specs.
+- The JavaScript-free report works in email, ticketing systems and archives. PDF export is
+  still future work.
+
+---
+
+## ADR-015: Saved analyses are fingerprinted JSON, refreshed on demand
+
+**Status:** Accepted
+
+**Context.** Phase 2D must let an analyst keep an analysis, know when its inputs have changed,
+and refresh it without a server daemon. Storing pickled objects or a live database would make
+projects less portable and harder to audit. Re-running every analysis on every open would hide
+staleness and waste time.
+
+**Decision.**
+
+- A saved analysis is a versioned JSON document under `analyses/<id>.json` holding the
+  analysis name, typed parameters, dataset, `use_pipeline`, schedule, timestamps, an input
+  fingerprint, an optional report path and the last typed `AnalysisResult`. Nothing executable
+  is stored.
+- The input fingerprint hashes the dataset checksum, the serialised pipeline when prepared
+  data is used, the application version and the `use_pipeline` flag. A mismatch marks the
+  result stale; a missing dataset marks it missing.
+- Schedules are declarative (`manual`, `on_open`, `hourly`, `daily`) and evaluated on demand:
+  project open, a workspace timer while the tab is visible, and `data-studio refresh --due`.
+  The CLI is the supported entry point for Windows Task Scheduler or cron.
+- Refreshes and saves write JSON atomically and optionally rewrite a self-contained report
+  under `reports/`. Corrupt documents are skipped and surfaced as errors so one bad file
+  cannot hide the rest.
+- The workspace polls due schedules at most once a minute and offers explicit Refresh due and
+  Refresh all actions.
+
+**Consequences.**
+
+- A project records what was analysed, against which inputs, and when; the same documents are
+  readable by the API, CLI and tests without running analysis code.
+- There is no background process to leak, so "scheduled" means "evaluated the next time a
+  surface asks", which is a deliberate local-first trade-off.
+- App-version changes invalidate results, so a kernel upgrade cannot silently keep
+  old-model numbers labelled fresh.
+- A future dashboard layer can reference saved-analysis ids without redefining their
+  evaluation or storage.
+
+---
+
 ## Open decisions
 
 These are deliberately deferred; record the answer here when it is made.

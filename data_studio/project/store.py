@@ -17,7 +17,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..engine.duckdb_engine import (
     DuckDBEngine,
@@ -32,6 +32,10 @@ from ..kernel.schema import TableSchema
 from ..kernel.table import TableData
 from ..pipeline.model import Pipeline
 from ..pipeline.runner import PipelineRunner, RunResult
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from ..analysis import AnalysisContext
+
 from .manifest import (
     DatasetEntry,
     DatasetFormat,
@@ -421,6 +425,40 @@ class Project:
             use_cache=use_cache,
             count_rows=count_rows,
         )
+
+    # -- analyses ----------------------------------------------------------
+
+    def analysis_context(
+        self,
+        dataset_id: str | None = None,
+        use_pipeline: bool = True,
+    ) -> AnalysisContext:
+        """Build the typed context every analysis runs against.
+
+        The default is the prepared pipeline output, so analysis numbers match the
+        cleaned preview. ``use_pipeline=False`` exposes the raw stored dataset.
+        """
+
+        from ..analysis import AnalysisContext
+
+        if use_pipeline:
+            run = self.run_pipeline(dataset_id=dataset_id, count_rows=False)
+            return AnalysisContext(
+                dataset=run.dataset,
+                table=run.table,
+                step_ids=tuple(step.step_id for step in run.steps),
+                engine="duckdb",
+            )
+        target = dataset_id or self.manifest.active_dataset
+        if not target:
+            raise ProjectError("The project has no active dataset to analyse.")
+        return AnalysisContext(
+            dataset=target,
+            table=self.dataset_table(target),
+            engine="duckdb",
+        )
+
+    # -- export ------------------------------------------------------------
 
     def export(
         self,

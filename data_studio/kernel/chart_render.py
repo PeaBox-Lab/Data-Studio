@@ -144,7 +144,7 @@ def _nice_ticks(lo: float, hi: float, target: int = 5) -> list[float]:
         step = raw_step
     start = math.floor(lo / step) * step
     end = math.ceil(hi / step) * step
-    count = int(round((end - start) / step))
+    count = round((end - start) / step)
     ticks = [start + index * step for index in range(count + 1)]
     if len(ticks) > 2 * target + 2:  # pragma: no cover - defensive
         ticks = ticks[:: max(1, len(ticks) // target)]
@@ -513,7 +513,8 @@ def _categorical_bars(
                 parts.append(
                     f'<rect x="{min(x, _map(0.0, value_lo, value_hi, left, right)):g}" '
                     f'y="{y:g}" width="{width_value:g}" height="{max(1.0, bar_width - 2):g}" '
-                    f'rx="2" fill="{color}"><title>{_escape(category)}: {_fmt(value)}</title></rect>'
+                    f'rx="2" fill="{color}"><title>{_escape(category)}: '
+                    f"{_fmt(value)}</title></rect>"
                 )
             else:
                 x = left + position * band + (band - group_width) / 2 + index * bar_width
@@ -525,7 +526,8 @@ def _categorical_bars(
                 parts.append(
                     f'<rect x="{x:g}" y="{min(y, _map(0.0, value_lo, value_hi, bottom, top)):g}" '
                     f'width="{max(1.0, bar_width - 2):g}" height="{height_value:g}" '
-                    f'rx="2" fill="{color}"><title>{_escape(category)}: {_fmt(value)}</title></rect>'
+                    f'rx="2" fill="{color}"><title>{_escape(category)}: '
+                    f"{_fmt(value)}</title></rect>"
                 )
 
     if horizontal:
@@ -541,7 +543,16 @@ def _categorical_bars(
         )
         for index, category in enumerate(categories):
             y = top + index * band + band / 2
-            parts.append(_text(left - 8, y + 4, category, fill=theme["muted"], size=11, anchor="end"))
+            parts.append(
+                _text(
+                    left - 8,
+                    y + 4,
+                    category,
+                    fill=theme["muted"],
+                    size=11,
+                    anchor="end",
+                )
+            )
     else:
         ticks = _nice_ticks(value_lo, value_hi)
         for tick in ticks:
@@ -550,7 +561,16 @@ def _categorical_bars(
                 f'<line x1="{left:g}" y1="{y:g}" x2="{right:g}" y2="{y:g}" '
                 f'stroke="{theme["grid"]}" stroke-width="1"/>'
             )
-            parts.append(_text(left - 8, y + 4, _fmt(tick), fill=theme["muted"], size=11, anchor="end"))
+            parts.append(
+                _text(
+                    left - 8,
+                    y + 4,
+                    _fmt(tick),
+                    fill=theme["muted"],
+                    size=11,
+                    anchor="end",
+                )
+            )
         parts.append(
             f'<line x1="{left:g}" y1="{top:g}" x2="{left:g}" y2="{bottom:g}" '
             f'stroke="{theme["axis"]}" stroke-width="1"/>'
@@ -617,7 +637,8 @@ def _scatter(
             y = _map(y_value, y_lo, y_hi, bottom, top)
             parts.append(
                 f'<circle cx="{x:g}" cy="{y:g}" r="3.4" fill="{color}" '
-                f'fill-opacity="0.78"><title>{_escape(_fmt(x_value))}, {_fmt(y_value)}</title></circle>'
+                f'fill-opacity="0.78"><title>{_escape(_fmt(x_value))}, '
+                f"{_fmt(y_value)}</title></circle>"
             )
     _legend(parts, entries, width=width, theme=theme)
 
@@ -665,7 +686,8 @@ def _histogram(
         parts.append(
             f'<rect x="{x + 1:g}" y="{y:g}" width="{max(1.0, band - 2):g}" '
             f'height="{bottom - y:g}" rx="2" fill="{PALETTE[0]}">'
-            f"<title>{_fmt(lo + index * step)} – {_fmt(lo + (index + 1) * step)}: {count}</title></rect>"
+            f"<title>{_fmt(lo + index * step)} – "
+            f"{_fmt(lo + (index + 1) * step)}: {count}</title></rect>"
         )
         if index % max(1, bins // 8) == 0:
             parts.append(
@@ -693,8 +715,8 @@ def _quantile(sorted_values: Sequence[float], probability: float) -> float:
     if len(sorted_values) == 1:
         return sorted_values[0]
     position = (len(sorted_values) - 1) * probability
-    lower = int(math.floor(position))
-    upper = int(math.ceil(position))
+    lower = math.floor(position)
+    upper = math.ceil(position)
     if lower == upper:
         return sorted_values[lower]
     weight = position - lower
@@ -775,8 +797,17 @@ def _box(
                 f'<circle cx="{center:g}" cy="{y:g}" r="2.4" fill="none" '
                 f'stroke="{color}" stroke-width="1.2"/>'
             )
+        rotate = -32 if len(categories) > 7 else None
         parts.append(
-            _text(center, bottom + 18, category, fill=theme["muted"], size=11, rotate=-32 if len(categories) > 7 else None, anchor="end" if len(categories) > 7 else "middle")
+            _text(
+                center,
+                bottom + 18,
+                category,
+                fill=theme["muted"],
+                size=11,
+                rotate=rotate,
+                anchor="end" if rotate else "middle",
+            )
         )
 
 
@@ -817,17 +848,28 @@ def _heatmap(
         x = left + column * cell_width
         y = top + row * cell_height
         parts.append(
-            f'<rect x="{x:g}" y="{y:g}" width="{cell_width - 2:g}" height="{cell_height - 2:g}" '
-            f'rx="2" fill="{color}"><title>{_escape(x_name)} · {_escape(y_name)}: {_fmt(value)}</title></rect>'
+            f'<rect x="{x:g}" y="{y:g}" width="{cell_width - 2:g}" '
+            f'height="{cell_height - 2:g}" rx="2" fill="{color}">'
+            f"<title>{_escape(x_name)} · {_escape(y_name)}: "
+            f"{_fmt(value)}</title></rect>"
         )
     for index, category in enumerate(x_categories):
         x = left + index * cell_width + cell_width / 2
         parts.append(_text(x, bottom + 16, category, fill=theme["muted"], size=11))
     for index, category in enumerate(y_categories):
         y = top + index * cell_height + cell_height / 2 + 4
-        parts.append(_text(left - 8, y, category, fill=theme["muted"], size=11, anchor="end"))
+        parts.append(
+            _text(left - 8, y, category, fill=theme["muted"], size=11, anchor="end")
+        )
     parts.append(
-        _text(right, top - 10, f"{_fmt(lo)} – {_fmt(hi)}", fill=theme["muted"], size=11, anchor="end")
+        _text(
+            right,
+            top - 10,
+            f"{_fmt(lo)} – {_fmt(hi)}",
+            fill=theme["muted"],
+            size=11,
+            anchor="end",
+        )
     )
 
 

@@ -7,11 +7,13 @@ import json
 import os
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext
+from ..analysis.saved import SCHEDULES, SavedAnalysisStore
 from ..engine.duckdb_engine import EngineError
 from ..io.sniff import CsvOptions
 from ..kernel.table import TableData
@@ -20,9 +22,11 @@ from ..project.manifest import (
     MANIFEST_FILENAME,
     init_project,
     load_manifest,
+    safe_project_path,
     verify_integrity,
 )
 from ..project.store import Project, ProjectError
+from ..reporting import write_html_report
 from ..version import __version__
 
 _CORE_PACKAGES = {
@@ -417,28 +421,17 @@ def _cmd_analyses(args: argparse.Namespace) -> int:
     return 0
 
 
+def _analysis_context(
+    project: Project, dataset: str | None, raw: bool
+) -> AnalysisContext:
+    return project.analysis_context(dataset_id=dataset, use_pipeline=not raw)
+
+
 def _cmd_analyze(args: argparse.Namespace) -> int:
     try:
         params = _read_params(args.params)
         with _open(args) as project:
-            if args.raw:
-                dataset = args.dataset or project.manifest.active_dataset
-                if not dataset:
-                    raise ProjectError("The project has no dataset to analyse.")
-                context = AnalysisContext(
-                    dataset=dataset,
-                    table=project.dataset_table(dataset),
-                )
-            else:
-                result = project.run_pipeline(
-                    dataset_id=args.dataset,
-                    count_rows=False,
-                )
-                context = AnalysisContext(
-                    dataset=result.dataset,
-                    table=result.table,
-                    step_ids=tuple(step.step_id for step in result.steps),
-                )
+            context = _analysis_context(project, args.dataset, args.raw)
             analysis = DEFAULT_ANALYSIS_REGISTRY.run(args.analysis, context, params)
             if args.json:
                 _print_json(analysis.to_dict())
@@ -459,6 +452,189 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
                 print("")
                 for diagnostic in analysis.diagnostics:
                     print(f"  [{diagnostic.severity}] {diagnostic.message}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    try:
+        params = _read_params(args.params)
+        with _open(args) as project:
+            context = _analysis_context(project, args.dataset, args.raw)
+            analysis = DEFAULT_ANALYSIS_REGISTRY.run(args.analysis, context, params)
+            destination = args.destination
+            if not destination:
+                stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+                destination = f"reports/report-{stamp}.html"
+            path = Path(destination)
+            if not path.is_absolute():
+                path = safe_project_path(
+                    project.root, destination.replace("\\", "/")
+                )
+            written = write_html_report(
+                analysis,
+                path,
+                title=args.title or analysis.title,
+                theme=args.theme,
+            )
+            if args.json:
+                _print_json(
+                    {
+                        "destination": str(written),
+                        "bytes": written.stat().st_size,
+                        "result_id": analysis.result_id,
+                    }
+                )
+                return 0
+            print(f"Wrote {analysis.title} report to {written}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _saved_text_row(item: dict[str, Any]) -> str:
+    schedule = item.get("schedule") or "manual"
+    status = item.get("status") or "unknown"
+    refreshed = item.get("refreshed_at") or "-"
+    return (
+        f"{item['id']:<28} {status:<8} {schedule:<8} {refreshed:<25} "
+        f"{item['title']}"
+    )
+
+
+def _cmd_save_analysis(args: argparse.Namespace) -> int:
+    try:
+        params = _read_params(args.params)
+        report_path: str | bool | None = None
+        if args.report_path:
+            report_path = args.report_path
+        elif args.report:
+            report_path = True
+        with _open(args) as project:
+            store = SavedAnalysisStore(project)
+            saved = store.save(
+                name=args.name,
+                analysis=args.analysis,
+                params=params,
+                dataset=args.dataset,
+                use_pipeline=not args.raw,
+                schedule=args.schedule,
+                title=args.title,
+                report_path=report_path,
+                overwrite=args.overwrite,
+            )
+            view = store.describe(saved)
+            if args.json:
+                _print_json(view)
+                return 0
+            print(f"Saved {saved.title!r} as {saved.id}")
+            print(f"  analysis   {saved.analysis}")
+            print(f"  schedule   {saved.schedule}")
+            print(f"  refreshed  {saved.refreshed_at}")
+            if saved.report_path:
+                print(f"  report     {saved.report_path}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_saved(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            store = SavedAnalysisStore(project)
+            if args.saved_id:
+                saved = store.get(args.saved_id)
+                view = store.describe(saved)
+                if args.json:
+                    payload = dict(view)
+                    payload["result"] = saved.result.to_dict() if saved.result else None
+                    _print_json(payload)
+                    return 0
+                print(f"{saved.title} ({saved.id})")
+                print(f"  analysis    {saved.analysis}")
+                print(f"  schedule    {saved.schedule}")
+                print(f"  status      {view['status']}")
+                print(f"  refreshed   {saved.refreshed_at}")
+                if view.get("next_refresh"):
+                    print(f"  next        {view['next_refresh']}")
+                if saved.report_path:
+                    print(f"  report      {saved.report_path}")
+                if saved.result:
+                    print(f"  result      {saved.result.result_id}")
+                    print(f"  narrative   {saved.result.narrative}")
+                    for name, value in saved.result.metrics.items():
+                        print(f"  {name:<18} {_cell(value)}")
+                return 0
+
+            summaries = store.summaries()
+            if args.json:
+                _print_json(
+                    {"analyses": summaries, "errors": store.last_errors}
+                )
+                return 0
+            if not summaries:
+                print("No saved analyses.")
+            else:
+                print(
+                    f"{'ID':<28} {'STATUS':<8} {'SCHEDULE':<8} "
+                    f"{'REFRESHED':<25} TITLE"
+                )
+                print("-" * 96)
+                for item in summaries:
+                    print(_saved_text_row(item))
+                print("")
+                print(
+                    "Refresh due: data-studio refresh PROJECT --due "
+                    "(or schedules run when the workspace is open)."
+                )
+            for error in store.last_errors:
+                print(f"WARNING: {error}", file=sys.stderr)
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_refresh(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            store = SavedAnalysisStore(project)
+            if args.saved_id:
+                refreshed = [store.refresh(args.saved_id)]
+                failures: list[dict[str, str]] = []
+            elif args.all:
+                refreshed, failures = store.refresh_all()
+            else:
+                refreshed, failures = store.refresh_due()
+            if args.json:
+                _print_json(
+                    {
+                        "refreshed": [store.describe(item) for item in refreshed],
+                        "failed": failures,
+                    }
+                )
+            else:
+                print(f"Refreshed {len(refreshed)} saved analysis(es).")
+                for item in refreshed:
+                    print(f"  {item.id:<28} {item.refreshed_at}  {item.title}")
+                for failure in failures:
+                    print(
+                        f"  FAILED {failure['id']}: {failure['error']}",
+                        file=sys.stderr,
+                    )
+        return 1 if failures else 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_remove_saved(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            SavedAnalysisStore(project).remove(args.saved_id)
+            if args.json:
+                _print_json({"removed": args.saved_id})
+            else:
+                print(f"Removed saved analysis {args.saved_id!r}.")
         return 0
     except _ERRORS as exc:
         return _fail(exc)
@@ -610,6 +786,106 @@ def build_parser() -> argparse.ArgumentParser:
     )
     analyze.add_argument("--json", action="store_true", help="Emit JSON.")
     analyze.set_defaults(handler=_cmd_analyze)
+
+    report = subparsers.add_parser(
+        "report", help="Run an analysis and export a self-contained HTML report."
+    )
+    report.add_argument("project", help="Project directory.")
+    report.add_argument("analysis", help="Registered analysis name.")
+    report.add_argument("--params", help="Analysis parameters as JSON, @file or -.")
+    report.add_argument("--dataset", help="Override the dataset.")
+    report.add_argument(
+        "--raw",
+        action="store_true",
+        help="Analyse the raw dataset instead of the pipeline output.",
+    )
+    report.add_argument(
+        "--destination",
+        help="Output HTML path (defaults to reports/report-<timestamp>.html).",
+    )
+    report.add_argument("--title", help="Report title (defaults to the analysis title).")
+    report.add_argument(
+        "--theme",
+        choices=("light", "dark"),
+        default="light",
+        help="Report colour theme.",
+    )
+    report.add_argument("--json", action="store_true", help="Emit JSON.")
+    report.set_defaults(handler=_cmd_report)
+
+    save_analysis = subparsers.add_parser(
+        "save-analysis",
+        help="Run an analysis and persist it under analyses/ for refresh and reuse.",
+    )
+    save_analysis.add_argument("project", help="Project directory.")
+    save_analysis.add_argument("name", help="Saved analysis name (used for its file id).")
+    save_analysis.add_argument("analysis", help="Registered analysis name.")
+    save_analysis.add_argument("--params", help="Analysis parameters as JSON, @file or -.")
+    save_analysis.add_argument("--dataset", help="Override the dataset.")
+    save_analysis.add_argument(
+        "--raw",
+        action="store_true",
+        help="Analyse the raw dataset instead of the pipeline output.",
+    )
+    save_analysis.add_argument(
+        "--schedule",
+        choices=SCHEDULES,
+        default="manual",
+        help="Refresh policy: manual, on_open, hourly or daily.",
+    )
+    save_analysis.add_argument("--title", help="Display title (defaults to the name).")
+    save_analysis.add_argument(
+        "--report",
+        action="store_true",
+        help="Write reports/<name>.html on every save and refresh.",
+    )
+    save_analysis.add_argument(
+        "--report-path",
+        help="Custom report path under reports/ (implies --report).",
+    )
+    save_analysis.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace an existing saved analysis with the same name.",
+    )
+    save_analysis.add_argument("--json", action="store_true", help="Emit JSON.")
+    save_analysis.set_defaults(handler=_cmd_save_analysis)
+
+    saved = subparsers.add_parser(
+        "saved",
+        help="List saved analyses or show one with its last result.",
+    )
+    saved.add_argument("project", help="Project directory.")
+    saved.add_argument("saved_id", nargs="?", help="Saved analysis id to show.")
+    saved.add_argument("--json", action="store_true", help="Emit JSON.")
+    saved.set_defaults(handler=_cmd_saved)
+
+    refresh = subparsers.add_parser(
+        "refresh",
+        help="Refresh due (or all) saved analyses; suitable for Task Scheduler/cron.",
+    )
+    refresh.add_argument("project", help="Project directory.")
+    refresh.add_argument("saved_id", nargs="?", help="Refresh only this saved analysis.")
+    refresh.add_argument(
+        "--due",
+        action="store_true",
+        help="Refresh only analyses whose schedule is due (default).",
+    )
+    refresh.add_argument(
+        "--all",
+        action="store_true",
+        help="Refresh every saved analysis regardless of schedule.",
+    )
+    refresh.add_argument("--json", action="store_true", help="Emit JSON.")
+    refresh.set_defaults(handler=_cmd_refresh)
+
+    remove_saved = subparsers.add_parser(
+        "remove-saved", help="Delete a saved analysis document."
+    )
+    remove_saved.add_argument("project", help="Project directory.")
+    remove_saved.add_argument("saved_id", help="Saved analysis id to remove.")
+    remove_saved.add_argument("--json", action="store_true", help="Emit JSON.")
+    remove_saved.set_defaults(handler=_cmd_remove_saved)
 
     serve = subparsers.add_parser("serve", help="Run the local web application.")
     serve.add_argument("--host", default="127.0.0.1")

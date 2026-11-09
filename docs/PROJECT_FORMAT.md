@@ -20,10 +20,11 @@ MyProject/
   analyses/             # stored AnalysisResult documents (Phase 2)
   dashboards/           # dashboard specifications (Phase 3)
   models/               # model artifacts and metadata (Phase 5)
+  reports/              # self-contained HTML reports (Phase 2C)
 ```
 
-The `steps/`, `analyses/`, `dashboards/` and `models/` directories are created with every
-project so later phases can add files without changing the layout.
+The `steps/`, `analyses/`, `dashboards/`, `models/` and `reports/` directories are created
+with every project so later phases can add files without changing the layout.
 
 ## Design guarantees
 
@@ -87,7 +88,7 @@ Example:
     }
   ],
   "active_dataset": "sales",
-  "directories": ["datasets", "steps", "analyses", "dashboards", "models"],
+  "directories": ["datasets", "steps", "analyses", "dashboards", "models", "reports"],
   "settings": {
     "preview_rows": 500
   }
@@ -296,15 +297,76 @@ Temporary files are not valid project files and are ignored by readers.
 - Unknown top-level fields are not preserved by the current reader. Add fields together
   with a format-version decision.
 
+## Saved analyses (`analyses/<id>.json`)
+
+Saved analyses are versioned JSON documents written by `SavedAnalysisStore`. They never
+contain executable code and are safe to open without running anything.
+
+```json
+{
+  "schema_version": "1",
+  "id": "monthly-revenue",
+  "title": "Monthly revenue",
+  "analysis": "descriptive_stats",
+  "params": {"columns": ["amount"]},
+  "dataset": "sales",
+  "use_pipeline": false,
+  "schedule": "daily",
+  "input_fingerprint": "sha256:…",
+  "created_at": "2026-11-09T09:00:00+00:00",
+  "refreshed_at": "2026-11-09T09:00:00+00:00",
+  "report_path": "reports/monthly-revenue.html",
+  "result": {"schema_version": "1", "kind": "descriptive_stats", "…": "…"}
+}
+```
+
+`id` is a slug (letters, digits and dashes) and must match the filename. `result` is the
+same typed `AnalysisResult` document the API returns, so a saved analysis renders without
+re-running. `report_path`, when present, must stay under `reports/`.
+
+### Freshness fingerprint
+
+`input_fingerprint` hashes:
+
+- the dataset's SHA-256 checksum,
+- the serialised pipeline when `use_pipeline` is true,
+- the application version,
+- the `use_pipeline` flag.
+
+If any input moves, the document is reported as `stale`; if the dataset disappears it is
+`missing`. Refreshing re-runs the analysis and rewrites the result, fingerprint,
+`refreshed_at` and report artifact atomically.
+
+### Schedules
+
+| Schedule | Meaning |
+|---|---|
+| `manual` | Never refreshes unless explicitly requested. |
+| `on_open` | Runs when the project is opened. |
+| `hourly` | Due one hour after `refreshed_at`. |
+| `daily` | Due one day after `refreshed_at`. |
+
+Schedules are evaluated on demand: project open, the workspace's minute timer while the tab
+is visible, or `data-studio refresh --due`. There is no background daemon. A missing or
+corrupt document is skipped and reported, so one bad file cannot hide the rest; writes use a
+temporary file, `fsync` and `os.replace`.
+
+Generated HTML reports (`reports/*.html`) are plain, self-contained artifacts with inline
+CSS and SVG: no scripts, external asset URLs or executable payloads. They carry no checksum
+in the manifest and can be deleted and regenerated at any time by a refresh.
+
 ## What is not stored yet
 
 The following are reserved by the layout and will be specified when their phases land:
 
-- `analyses/*.json` stored `AnalysisResult` documents — Phase 2A/2B run analyses on demand
-  and return them to the caller; they do not yet write results into the project,
 - `dashboards/*.json` dashboard specifications,
 - `models/` model artifacts and registry metadata,
 - `lineage.json` derived-table lineage.
+
+Generated HTML reports (`reports/*.html`) are written by the report exporter. They are
+plain, self-contained artifacts with inline CSS and SVG: no scripts, external asset URLs
+or executable payloads. They carry no checksum in the manifest and can be deleted and
+regenerated at any time.
 
 They will follow the same rules: versioned JSON, relative paths, no executable payloads,
 and explicit integrity metadata where files are referenced.

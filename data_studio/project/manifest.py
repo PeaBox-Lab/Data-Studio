@@ -9,6 +9,7 @@ A project is a directory:
       analyses/*.json
       dashboards/*.json
       models/
+      reports/*.html
 
 Guarantees:
 
@@ -40,7 +41,14 @@ from ..version import PROJECT_FORMAT_VERSION, __version__
 
 MANIFEST_FILENAME = "project.json"
 CURRENT_PROJECT_MANIFEST_VERSION = PROJECT_FORMAT_VERSION
-PROJECT_DIRECTORIES = ("datasets", "steps", "analyses", "dashboards", "models")
+PROJECT_DIRECTORIES = (
+    "datasets",
+    "steps",
+    "analyses",
+    "dashboards",
+    "models",
+    "reports",
+)
 
 _DATASET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _CHECKSUM = re.compile(r"^[0-9a-f]{64}$")

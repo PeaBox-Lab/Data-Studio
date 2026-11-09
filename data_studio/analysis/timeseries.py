@@ -13,6 +13,7 @@ forecasts with widening intervals, and a hold-out backtest.
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -238,12 +239,14 @@ def _prepare(table: DuckDBTable, time_column: str, value_column: str) -> SeriesD
     seasonal_period = _period_for_seconds(step_seconds)
     if is_datetime and len(data) >= 3:
         try:
-            inferred = pd.infer_freq(pd.DatetimeIndex(data[time_column]))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                inferred = pd.infer_freq(pd.DatetimeIndex(data[time_column]))
         except ValueError:
             inferred = None
         if inferred:
-            frequency = inferred
-            seasonal_period = _period_for_frequency(inferred)
+            frequency = getattr(inferred, "freqstr", None) or str(inferred)
+            seasonal_period = _period_for_frequency(frequency)
     if frequency == "irregular" and step_seconds:
         frequency = _human_seconds(step_seconds)
 
@@ -526,7 +529,7 @@ def acf_pacf(context: AnalysisContext, params: Mapping[str, Any]) -> AnalysisRes
     significant = 0
     for lag in range(1, max_lag + 1):
         statistic, pvalue = _ljung_box(series.values, acf_values, lag)
-        is_significant = abs(acf_values[lag]) > bound
+        is_significant = bool(abs(acf_values[lag]) > bound)
         significant += int(is_significant)
         rows.append(
             (
@@ -695,10 +698,11 @@ def seasonal_decompose(
             raise AnalysisError("The multiplicative seasonal indices are undefined.")
         period_averages /= mean
     seasonal = np.resize(period_averages, n)
-    if model == "additive":
-        residual = values - trend - seasonal
-    else:
-        residual = values - trend * seasonal
+    residual = (
+        values - trend - seasonal
+        if model == "additive"
+        else values - trend * seasonal
+    )
     valid = np.isfinite(residual)
     residual_variance = float(np.nanvar(residual)) if valid.any() else float("nan")
     detrended_component = residual + seasonal if model == "additive" else residual * seasonal
@@ -763,11 +767,15 @@ def seasonal_decompose(
         else None,
         "trend_points": int(np.isfinite(trend).sum()),
     }
+    residual_std_text = (
+        "n/a"
+        if not np.isfinite(residual_variance)
+        else f"{math.sqrt(residual_variance):.4g}"
+    )
     narrative = (
         f"Classic {model} decomposition with period {period} over {n:,} observation(s). "
         f"Seasonal strength is {seasonal_strength:.3f} and trend strength is "
-        f"{trend_strength:.3f}; residual standard deviation is "
-        f"{'n/a' if not np.isfinite(residual_variance) else f'{math.sqrt(residual_variance):.4g}'}."
+        f"{trend_strength:.3f}; residual standard deviation is {residual_std_text}."
     )
     observed_trend_records = [
         {"period": period_label, "series": name, "value": value}
@@ -923,11 +931,12 @@ def trend_test(context: AnalysisContext, params: Mapping[str, Any]) -> AnalysisR
         "significant": significant,
         "direction": trend_text,
     }
+    slope_text = "n/a" if slope is None else f"{slope:.4g}"
+    article = "an" if trend_text == "increasing" else "a"
     narrative = (
-        f"The Mann-Kendall test over {n:,} observation(s) found a {trend_text} "
+        f"The Mann-Kendall test over {n:,} observation(s) found {article} {trend_text} "
         f"monotonic trend (S={statistic:.1f}, z={z_value:.3f}, p={p_text(pvalue)}, "
-        f"Kendall tau={tau:.3f}). Sen's slope is "
-        f"{'n/a' if slope is None else f'{slope:.4g}'} per time unit."
+        f"Kendall tau={tau:.3f}). Sen's slope is {slope_text} per time unit."
     )
     return result(
         context,
@@ -1220,9 +1229,6 @@ def arima_forecast(
     fitted = _fit_arma(differenced, p, q, constant)
     parameters = fitted["parameters"]
     errors = fitted["errors"]
-    offset = 1 if constant else 0
-    phi = parameters[offset : offset + p]
-    theta = parameters[offset + p : offset + p + q]
     forecast_differences = _forecast_arma(
         parameters,
         differenced,
@@ -1386,11 +1392,12 @@ def arima_forecast(
         "confidence": confidence,
         **holdout_metrics,
     }
+    aic_text = "n/a" if fitted["aic"] is None else f"{fitted['aic']:.3f}"
+    bic_text = "n/a" if fitted["bic"] is None else f"{fitted['bic']:.3f}"
     narrative = (
         f"ARIMA({p},{d},{q}) was fitted to {n:,} observation(s) by conditional sum of "
         f"squares and produced a {horizon}-step forecast. AIC is "
-        f"{'n/a' if fitted['aic'] is None else f'{fitted['aic']:.3f}'} and BIC is "
-        f"{'n/a' if fitted['bic'] is None else f'{fitted['bic']:.3f}'}."
+        f"{aic_text} and BIC is {bic_text}."
     )
     if holdout_metrics:
         narrative += (

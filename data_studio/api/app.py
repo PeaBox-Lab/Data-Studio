@@ -13,6 +13,8 @@ workspace asks the user to create or open one.
 from __future__ import annotations
 
 import os
+from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,10 +23,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext, AnalysisError
+from ..analysis.saved import (
+    SCHEDULES,
+    SavedAnalysisStore,
+)
 from ..engine.duckdb_engine import EngineError
+from ..kernel.chart_render import DEFAULT_HEIGHT, DEFAULT_WIDTH, render_chart
+from ..kernel.spec import ChartSpec
 from ..pipeline import Pipeline, PipelineRunError, make_step
 from ..pipeline.runner import PipelineRunner
+from ..project.manifest import safe_project_path
 from ..project.store import Project, ProjectError
+from ..reporting import write_html_report
 from ..steps import DEFAULT_REGISTRY
 from ..steps.registry import StepError, UnknownStepError
 from ..version import API_VERSION, PROJECT_FORMAT_VERSION, __version__
@@ -134,6 +144,56 @@ def create_app(
     def project() -> Project:
         return state.current()
 
+    def analysis_context(
+        dataset_id: str | None, use_pipeline: bool
+    ) -> AnalysisContext:
+        return project().analysis_context(
+            dataset_id=dataset_id, use_pipeline=use_pipeline
+        )
+
+    def saved_store() -> SavedAnalysisStore:
+        return SavedAnalysisStore(project())
+
+    def refresh_on_open(active: Project) -> None:
+        # A scheduled refresh must never stop a project from opening.
+        with suppress(OSError, ValueError, TypeError, KeyError, RuntimeError):
+            SavedAnalysisStore(active).refresh_due(only_on_open=True)
+
+    def parse_requested_dataset(payload: dict[str, Any]) -> str | None:
+        dataset_id = payload.get("dataset")
+        if dataset_id is not None and not isinstance(dataset_id, str):
+            raise ValueError("Analysis 'dataset' must be a string or null.")
+        return dataset_id.strip() if dataset_id else None
+
+    def report_results(payload: dict[str, Any]) -> list[Any]:
+        raw = payload.get("analyses")
+        if raw is None:
+            if "analysis" not in payload:
+                raise ValueError(
+                    "A report needs an 'analysis' name or an 'analyses' list."
+                )
+            raw = [payload]
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("'analyses' must be a non-empty list of analysis requests.")
+        results = []
+        for index, entry in enumerate(raw):
+            if not isinstance(entry, dict):
+                raise ValueError(f"Analysis request {index} must be an object.")
+            name = entry.get("analysis")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(
+                    f"Analysis request {index} needs a non-empty 'analysis' name."
+                )
+            params = entry.get("params") or {}
+            if not isinstance(params, dict):
+                raise ValueError(f"Analysis request {index} 'params' must be an object.")
+            context = analysis_context(
+                parse_requested_dataset(entry),
+                bool(entry.get("use_pipeline", True)),
+            )
+            results.append(DEFAULT_ANALYSIS_REGISTRY.run(name, context, params))
+        return results
+
     # -- system ------------------------------------------------------------
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -183,6 +243,7 @@ def create_app(
         if not isinstance(path, str) or not path.strip():
             raise ValueError("An object with a 'path' string is required.")
         active = state.open(path, verify=bool(payload.get("verify", False)))
+        refresh_on_open(active)
         return {"open": True, "root": str(active.root), "project": active.to_dict()}
 
     @app.post("/api/v1/project/create", tags=["project"])
@@ -192,6 +253,7 @@ def create_app(
             raise ValueError("An object with a 'path' string is required.")
         name = payload.get("name")
         active = state.create(path, str(name) if name else None)
+        refresh_on_open(active)
         return {"open": True, "root": str(active.root), "project": active.to_dict()}
 
     @app.post("/api/v1/project/close", tags=["project"])
@@ -367,31 +429,176 @@ def create_app(
             params = {}
         if not isinstance(params, dict):
             raise ValueError("Analysis 'params' must be an object.")
-        dataset_id = payload.get("dataset")
-        if dataset_id is not None and not isinstance(dataset_id, str):
-            raise ValueError("Analysis 'dataset' must be a string or null.")
-        dataset_id = dataset_id.strip() if dataset_id else None
-
-        active = project()
-        use_pipeline = bool(payload.get("use_pipeline", True))
-        if use_pipeline:
-            run = active.run_pipeline(dataset_id=dataset_id, count_rows=False)
-            context = AnalysisContext(
-                dataset=run.dataset,
-                table=run.table,
-                step_ids=tuple(step.step_id for step in run.steps),
-                engine="duckdb",
-            )
-        else:
-            target = dataset_id or active.manifest.active_dataset
-            if not target:
-                raise ProjectError("The project has no active dataset to analyse.")
-            context = AnalysisContext(
-                dataset=target,
-                table=active.dataset_table(target),
-                engine="duckdb",
-            )
+        context = analysis_context(
+            parse_requested_dataset(payload),
+            bool(payload.get("use_pipeline", True)),
+        )
         return DEFAULT_ANALYSIS_REGISTRY.run(name, context, params).to_dict()
+
+    # -- saved analyses ----------------------------------------------------
+
+    def saved_view(saved: Any, store: SavedAnalysisStore) -> dict[str, Any]:
+        view = store.describe(saved)
+        view["result"] = saved.result.to_dict() if saved.result else None
+        return view
+
+    @app.get("/api/v1/saved-analyses", tags=["analyses"])
+    def list_saved_analyses() -> dict[str, Any]:
+        store = saved_store()
+        return {
+            "analyses": store.summaries(),
+            "errors": store.last_errors,
+            "schedules": list(SCHEDULES),
+        }
+
+    @app.post("/api/v1/saved-analyses", status_code=201, tags=["analyses"])
+    def save_analysis(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A saved analysis request object is required.")
+        name = payload.get("name") or payload.get("title") or payload.get("id")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A saved analysis needs a non-empty 'name'.")
+        analysis = payload.get("analysis")
+        if not isinstance(analysis, str) or not analysis.strip():
+            raise ValueError("A saved analysis needs an 'analysis' name.")
+        params = payload.get("params") or {}
+        if not isinstance(params, dict):
+            raise ValueError("Saved analysis 'params' must be an object.")
+        schedule = payload.get("schedule") or "manual"
+        if schedule not in SCHEDULES:
+            raise ValueError(f"Schedule must be one of: {', '.join(SCHEDULES)}.")
+        report_path = payload.get("report_path")
+        if report_path is None and payload.get("report"):
+            report_path = True
+        store = saved_store()
+        saved = store.save(
+            name=name,
+            analysis=analysis,
+            params=params,
+            dataset=parse_requested_dataset(payload),
+            use_pipeline=bool(payload.get("use_pipeline", True)),
+            schedule=str(schedule),
+            title=payload.get("title"),
+            report_path=report_path,
+            overwrite=bool(payload.get("overwrite", False)),
+        )
+        return saved_view(saved, store)
+
+    @app.post("/api/v1/saved-analyses/refresh", tags=["analyses"])
+    def refresh_saved_analyses(
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = payload or {}
+        if not isinstance(request, dict):
+            raise ValueError("A refresh request must be an object.")
+        store = saved_store()
+        saved_id = request.get("id") or request.get("name")
+        if saved_id is not None:
+            refreshed = [store.refresh(str(saved_id))]
+            failures: list[dict[str, str]] = []
+        elif bool(request.get("due", True)):
+            refreshed, failures = store.refresh_due()
+        else:
+            refreshed, failures = store.refresh_all()
+        return {
+            "analyses": [saved_view(item, store) for item in refreshed],
+            "failed": failures,
+        }
+
+    @app.get("/api/v1/saved-analyses/{saved_id}", tags=["analyses"])
+    def get_saved_analysis(saved_id: str) -> dict[str, Any]:
+        store = saved_store()
+        return saved_view(store.get(saved_id), store)
+
+    @app.delete("/api/v1/saved-analyses/{saved_id}", tags=["analyses"])
+    def remove_saved_analysis(saved_id: str) -> dict[str, str]:
+        saved_store().remove(saved_id)
+        return {"removed": saved_id}
+
+    @app.post("/api/v1/saved-analyses/{saved_id}/refresh", tags=["analyses"])
+    def refresh_saved_analysis(saved_id: str) -> dict[str, Any]:
+        store = saved_store()
+        return saved_view(store.refresh(saved_id), store)
+
+    @app.get(
+        "/api/v1/saved-analyses/{saved_id}/report",
+        response_class=HTMLResponse,
+        tags=["analyses"],
+    )
+    def saved_analysis_report(saved_id: str) -> HTMLResponse:
+        saved = saved_store().get(saved_id)
+        if not saved.report_path:
+            raise ValueError("This saved analysis has no report artifact.")
+        path = safe_project_path(project().root, saved.report_path)
+        if not path.is_file():
+            raise KeyError("Report artifact not found; refresh the saved analysis.")
+        return HTMLResponse(path.read_text(encoding="utf-8"))
+
+    # -- charts and reports ------------------------------------------------
+
+    @app.post("/api/v1/charts/render", tags=["charts"])
+    def render_chart_spec(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A chart specification object is required.")
+        theme = payload.get("theme") or "light"
+        width = int(payload.get("width") or DEFAULT_WIDTH)
+        height = int(payload.get("height") or DEFAULT_HEIGHT)
+        if "charts" in payload:
+            raw = payload["charts"]
+            if not isinstance(raw, list) or not raw:
+                raise ValueError("'charts' must be a non-empty list of specifications.")
+            specs = [ChartSpec.from_dict(item) for item in raw]
+            return {
+                "svgs": [
+                    render_chart(spec, width=width, height=height, theme=theme)
+                    for spec in specs
+                ]
+            }
+        chart_payload = payload.get("chart", payload)
+        spec = ChartSpec.from_dict(chart_payload)
+        return {
+            "title": spec.title,
+            "chart_type": spec.chart_type.value,
+            "svg": render_chart(spec, width=width, height=height, theme=theme),
+        }
+
+    @app.post("/api/v1/analyses/report", tags=["analyses"])
+    def analysis_report(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A report request object is required.")
+        results = report_results(payload)
+        active = project()
+        title = payload.get("title") or "Data Studio report"
+        if not isinstance(title, str):
+            raise ValueError("Report 'title' must be a string.")
+        theme = payload.get("theme") or "light"
+        if theme not in ("light", "dark"):
+            raise ValueError("Report theme must be 'light' or 'dark'.")
+        destination = payload.get("destination")
+        if destination is None:
+            stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            destination = f"reports/report-{stamp}.html"
+        if not isinstance(destination, str) or not destination.strip():
+            raise ValueError("Report 'destination' must be a non-empty string.")
+        relative = destination.strip().replace("\\", "/")
+        path = safe_project_path(active.root, relative)
+        written = write_html_report(
+            results,
+            path,
+            title=title,
+            subtitle=payload.get("subtitle"),
+            theme=theme,
+            chart_width=int(payload.get("width") or DEFAULT_WIDTH),
+            chart_height=int(payload.get("height") or DEFAULT_HEIGHT),
+        )
+        return {
+            "title": title,
+            "destination": str(written),
+            "relative_path": relative,
+            "bytes": written.stat().st_size,
+            "results": [item.result_id for item in results],
+            "html": written.read_text(encoding="utf-8"),
+        }
 
     return app
 

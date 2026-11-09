@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,15 +8,20 @@
   :root {
     color-scheme: light;
     --navy: #0b1b33;
-    --navy-2: #122744;
-    --navy-3: #1b3557;
     --ink: #0f172a;
+    --ink-2: #334155;
     --muted: #64748b;
     --muted-2: #94a3b8;
     --line: #e2e8f0;
     --line-2: #eef2f7;
-    --bg: #f4f6fa;
+    --bg: #f5f7fb;
     --panel: #ffffff;
+    --panel-2: #f8fafc;
+    --panel-3: #f1f5f9;
+    --topbar: rgba(255, 255, 255, .86);
+    --sidebar-bg: linear-gradient(180deg, #0b1b33 0%, #0a1830 100%);
+    --sidebar-ink: #dbe7f7;
+    --sidebar-muted: #8fa6c4;
     --accent: #2563eb;
     --accent-2: #7c3aed;
     --accent-soft: #eef4ff;
@@ -29,76 +34,99 @@
     --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .05);
     --radius: 14px;
   }
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --ink: #e6edf7;
+    --ink-2: #cbd5e1;
+    --muted: #94a3b8;
+    --muted-2: #64748b;
+    --line: #22304a;
+    --line-2: #1b2740;
+    --bg: #0b1220;
+    --panel: #111b2e;
+    --panel-2: #0f1829;
+    --panel-3: #17233b;
+    --topbar: rgba(17, 27, 46, .86);
+    --sidebar-bg: linear-gradient(180deg, #0a1428 0%, #070f20 100%);
+    --sidebar-muted: #7f96b5;
+    --accent-soft: #16294d;
+    --ok-soft: #0e2f2a;
+    --warn-soft: #3a2a12;
+    --danger-soft: #3a1a1d;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 10px 30px rgba(0, 0, 0, .35);
+  }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
-    font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
-    font-size: 14px; line-height: 1.45;
+    font-family: "Inter", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased;
   }
   [hidden] { display: none !important; }
   button, input, select, textarea { font: inherit; }
   button { cursor: pointer; }
   .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   /* layout */
-  .app { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 100vh; }
+  .app { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
   .sidebar {
-    background: linear-gradient(180deg, var(--navy) 0%, #0a1830 100%);
-    color: #dbe7f7; padding: 22px 16px; display: flex; flex-direction: column;
-    gap: 24px; position: sticky; top: 0; height: 100vh;
+    background: var(--sidebar-bg); color: var(--sidebar-ink); padding: 20px 14px;
+    display: flex; flex-direction: column; gap: 22px; position: sticky; top: 0; height: 100vh;
   }
-  .brand { display: flex; align-items: center; gap: 11px; padding: 0 6px; }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 0 7px; }
   .brand-mark {
-    width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+    width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center;
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #fff; font-weight: 800; letter-spacing: -.03em; font-size: 14px;
-    box-shadow: 0 6px 18px rgba(37, 99, 235, .35);
+    box-shadow: 0 8px 22px rgba(37, 99, 235, .38);
   }
-  .brand-text { display: flex; flex-direction: column; }
+  .brand-text { display: flex; flex-direction: column; min-width: 0; }
   .brand-text strong { font-size: 15px; color: #fff; letter-spacing: -.01em; }
-  .brand-text span { font-size: 11px; color: #8fa6c4; }
-  .nav { display: grid; gap: 4px; }
+  .brand-text span { font-size: 11px; color: var(--sidebar-muted); }
+  .nav { display: grid; gap: 3px; }
   .nav-item {
     display: flex; align-items: center; gap: 11px; width: 100%; border: 0;
-    background: transparent; color: #aec2dc; text-align: left; padding: 10px 12px;
+    background: transparent; color: #aec2dc; text-align: left; padding: 9px 11px;
     border-radius: 9px; font-size: 13.5px; font-weight: 500; transition: .15s;
   }
   .nav-item svg { width: 18px; height: 18px; flex: 0 0 auto; opacity: .9; }
   .nav-item:hover { background: rgba(255, 255, 255, .06); color: #fff; }
   .nav-item.active { background: rgba(255, 255, 255, .12); color: #fff; box-shadow: inset 3px 0 0 #60a5fa; }
+  .nav-item .nav-badge { margin-left: auto; font-size: 10.5px; background: rgba(255,255,255,.14); color: #dbe7f7; border-radius: 999px; padding: 1px 7px; }
   .sidebar-note {
     margin-top: auto; border: 1px solid rgba(255, 255, 255, .1);
     background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 11px 12px;
     font-size: 12px; color: #b9cbe3;
   }
   .sidebar-note .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #34d399; margin-right: 6px; }
-  .sidebar-note small { display: block; color: #7891b1; margin-top: 4px; font-size: 11px; }
+  .sidebar-note small { display: block; color: var(--sidebar-muted); margin-top: 4px; font-size: 11px; }
 
   .shell { display: flex; flex-direction: column; min-width: 0; }
   .topbar {
-    display: flex; align-items: center; gap: 18px; padding: 18px 28px;
-    background: rgba(255, 255, 255, .85); backdrop-filter: blur(10px);
+    display: flex; align-items: center; gap: 16px; padding: 16px 26px;
+    background: var(--topbar); backdrop-filter: blur(12px);
     border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20;
   }
+  .page-heading { min-width: 0; }
   .page-heading h1 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
   .page-heading p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
-  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
   .chip {
     border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-    border-radius: 999px; padding: 7px 12px; font-size: 12px; max-width: 260px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    border-radius: 999px; padding: 6px 11px; font-size: 12px; max-width: 240px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: .15s;
   }
-  .chip:hover { border-color: #cbd5e1; }
+  .chip:hover { border-color: var(--muted-2); }
   .chip.muted { color: var(--muted); }
-  .content { padding: 24px 28px 48px; display: grid; gap: 18px; max-width: 1560px; width: 100%; }
+  .content { padding: 22px 26px 48px; display: grid; gap: 16px; max-width: 1560px; width: 100%; }
 
   /* cards */
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-  .card-head { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--line-2); }
+  .card-head { display: flex; align-items: center; gap: 12px; padding: 15px 18px; border-bottom: 1px solid var(--line-2); flex-wrap: wrap; }
   .card-head h2 { margin: 0; font-size: 15px; letter-spacing: -.015em; }
   .card-head .actions { margin-left: auto; }
-  .card-body { padding: 18px; display: grid; gap: 14px; }
+  .card-body { padding: 18px; display: grid; gap: 13px; }
   .eyebrow { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--accent); }
   .muted { color: var(--muted); }
   .hint { color: var(--muted); font-size: 12px; margin: 0; }
@@ -107,83 +135,107 @@
   .pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; padding: 3px 9px; white-space: nowrap; }
   .pill.green { background: var(--ok-soft); color: var(--ok); }
   .pill.warn { background: var(--warn-soft); color: var(--warn); }
-  .pill.gray { background: #f1f5f9; color: var(--muted); }
+  .pill.gray { background: var(--panel-3); color: var(--muted); }
   .pill.red { background: var(--danger-soft); color: var(--danger); }
   .divider { height: 1px; background: var(--line-2); }
   .section-title { margin: 0; font-size: 14px; }
+  .section-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .empty { color: var(--muted); font-size: 13px; padding: 14px 2px; margin: 0; }
 
   /* forms */
   .field { display: grid; gap: 6px; }
-  .field > span, .field > label { font-size: 12px; font-weight: 600; color: #334155; }
+  .field > span, .field > label, .field-label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
   .field small { font-size: 11px; color: var(--muted); }
+  .field-label { display: flex; align-items: center; gap: 4px; }
   input, select, textarea {
-    width: 100%; border: 1px solid #cbd5e1; background: #fff; color: var(--ink);
+    width: 100%; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
     border-radius: 9px; padding: 8px 10px; font-size: 13px; outline: none; transition: .15s;
   }
-  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .13); }
+  input:hover, select:hover, textarea:hover { border-color: var(--muted-2); }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37, 99, 235, .14); }
   textarea { min-height: 78px; resize: vertical; font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12px; }
-  input[type="file"] { padding: 6px; background: #f8fafc; }
+  input[type="file"] { padding: 6px; background: var(--panel-2); }
   input[type="checkbox"] { width: auto; accent-color: var(--accent); }
-  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .form-grid .wide { grid-column: 1 / -1; }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .form-grid .wide, .form-grid .span-2 { grid-column: 1 / -1; }
   .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #334155; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+  .check.compact { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
   .btn {
-    border: 1px solid #cbd5e1; background: #fff; color: var(--ink); border-radius: 9px;
-    padding: 8px 13px; font-size: 13px; font-weight: 600; transition: .15s; white-space: nowrap;
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 9px;
+    padding: 7px 12px; font-size: 13px; font-weight: 600; transition: .15s; white-space: nowrap;
   }
-  .btn:hover { border-color: #94a3b8; background: #f8fafc; }
-  .btn.primary { border-color: transparent; background: linear-gradient(135deg, var(--accent), #1d4ed8); color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, .22); }
+  .btn:hover { border-color: var(--muted-2); background: var(--panel-2); }
+  .btn.primary { border-color: transparent; background: linear-gradient(135deg, var(--accent), #1d4ed8); color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, .24); }
   .btn.primary:hover { filter: brightness(1.06); }
   .btn.ghost { background: transparent; }
   .btn.danger { color: var(--danger); }
-  .btn.danger:hover { border-color: #fecaca; background: var(--danger-soft); }
+  .btn.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
   .btn.sm { padding: 5px 9px; font-size: 11.5px; }
   .btn:disabled { opacity: .48; cursor: not-allowed; box-shadow: none; }
+  .icon-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 7px; padding: 4px 7px; font-size: 11px; color: var(--muted); }
+  .icon-btn:hover { border-color: var(--muted-2); color: var(--ink); }
+  .icon-btn.danger { color: var(--danger); }
+  .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .icon-btn.round { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; padding: 0; font-size: 14px; }
   .inline-input { display: flex; gap: 8px; align-items: center; }
+
+  /* help affordances */
+  .help-dot {
+    display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+    font-size: 9.5px; font-weight: 800; line-height: 1; cursor: help; flex: 0 0 auto;
+  }
+  .help-dot:hover, .help-dot:focus-visible { border-color: var(--accent); color: var(--accent); }
+  .tooltip {
+    position: fixed; z-index: 200; pointer-events: none; max-width: 300px;
+    background: #0b1b33; color: #e9f1ff; border: 1px solid rgba(255,255,255,.12);
+    border-radius: 9px; padding: 8px 10px; font-size: 12px; line-height: 1.4;
+    box-shadow: 0 14px 34px rgba(2, 8, 20, .35); white-space: pre-line;
+    opacity: 0; transform: translateY(3px); transition: opacity .12s ease, transform .12s ease;
+  }
+  .tooltip.visible { opacity: 1; transform: none; }
 
   /* overview */
   .setup { border-top: 3px solid var(--accent); }
-  .project-banner { display: flex; align-items: center; gap: 18px; padding: 18px; }
+  .project-banner { display: flex; align-items: center; gap: 18px; padding: 18px; flex-wrap: wrap; }
   .project-main { min-width: 0; }
   .project-main h2 { margin: 2px 0 3px; font-size: 19px; letter-spacing: -.025em; }
   .project-main p { margin: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
   .project-banner .actions { margin-left: auto; }
-  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
-  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 17px; box-shadow: var(--shadow); }
-  .kpi .label { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-  .kpi .value { font-size: 27px; font-weight: 700; letter-spacing: -.04em; margin-top: 6px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 15px 16px; box-shadow: var(--shadow); }
+  .kpi .label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .kpi .value { font-size: 26px; font-weight: 700; letter-spacing: -.04em; margin-top: 5px; }
   .kpi .sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
-  .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: start; }
+  .two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; align-items: start; }
   .quick-actions { display: flex; flex-wrap: wrap; gap: 9px; }
   .notes { margin: 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; display: grid; gap: 7px; }
-
-  /* data */
-  .panel-grid { display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 18px; align-items: start; }
-  .data-grid { grid-template-columns: 380px minmax(0, 1fr); }
-  .import-box { display: grid; grid-template-columns: 1fr; gap: 9px; padding: 12px; border: 1px dashed #cbd5e1; border-radius: 11px; background: #f8fafc; }
+/* data */
+  .panel-grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .data-grid { grid-template-columns: 370px minmax(0, 1fr); }
+  .import-box { display: grid; grid-template-columns: 1fr; gap: 9px; padding: 12px; border: 1px dashed var(--line); border-radius: 11px; background: var(--panel-2); }
   .dataset-list { display: grid; gap: 8px; }
   .dataset-item {
     display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
-    border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 10px 12px;
+    border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 10px 12px;
   }
-  .dataset-item:hover { border-color: #bfdbfe; background: #f8fbff; }
+  .dataset-item:hover { border-color: var(--accent); background: var(--accent-soft); }
   .dataset-item.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
   .dataset-item .ds-main { min-width: 0; display: grid; gap: 1px; }
   .dataset-item strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
   .dataset-item .meta { font-size: 11.5px; color: var(--muted); }
   .dataset-item .tag { margin-left: auto; }
-  .tabs { display: flex; gap: 4px; padding: 4px; background: #f1f5f9; border-radius: 10px; width: fit-content; }
+  .tabs { display: flex; gap: 4px; padding: 4px; background: var(--panel-3); border-radius: 10px; width: fit-content; }
   .tab { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 6px 13px; font-size: 12.5px; font-weight: 600; }
-  .tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
+  .tab.active { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgba(15, 23, 42, .12); }
 
   /* tables */
-  .table-wrap { overflow: auto; max-height: 420px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  .table-wrap { overflow: auto; max-height: 420px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
   table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
   th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line-2); white-space: nowrap; vertical-align: top; }
-  th { position: sticky; top: 0; background: #f8fafc; color: #475569; font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; z-index: 1; }
-  tbody tr:hover { background: #f8fbff; }
+  th { position: sticky; top: 0; background: var(--panel-2); color: var(--muted); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; z-index: 1; }
+  tbody tr:hover { background: var(--panel-2); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   td .null { color: var(--muted-2); }
   .table-note { font-size: 11.5px; color: var(--muted); margin: 6px 2px 0; }
@@ -193,55 +245,107 @@
   .step-list { display: grid; gap: 9px; }
   .step-card {
     display: flex; align-items: center; gap: 11px; border: 1px solid var(--line);
-    border-radius: 11px; padding: 10px 12px; background: #fff;
+    border-radius: 11px; padding: 10px 12px; background: var(--panel);
   }
-  .step-card.disabled { opacity: .58; background: #f8fafc; }
+  .step-card.disabled { opacity: .58; background: var(--panel-2); }
   .step-index {
-    width: 28px; height: 28px; border-radius: 8px; background: #f1f5f9; color: #475569;
+    width: 28px; height: 28px; border-radius: 8px; background: var(--panel-3); color: var(--muted);
     display: grid; place-items: center; font-size: 12px; font-weight: 700; flex: 0 0 auto;
   }
   .step-main { min-width: 0; display: grid; gap: 2px; }
   .step-main strong { font-size: 13px; }
   .step-main .meta { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
   .step-actions { margin-left: auto; display: flex; gap: 5px; flex-wrap: wrap; }
-  .icon-btn { border: 1px solid var(--line); background: #fff; border-radius: 7px; padding: 4px 7px; font-size: 11px; color: #475569; }
-  .icon-btn:hover { border-color: #94a3b8; }
-  .icon-btn.danger { color: var(--danger); }
-  .icon-btn:disabled { opacity: .4; }
 
   /* analyze */
-  .analyze-grid { grid-template-columns: 410px minmax(0, 1fr); }
-  .analysis-list { display: grid; gap: 8px; }
-  .analysis-item { text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 10px 12px; display: grid; gap: 3px; }
-  .analysis-item:hover { border-color: #bfdbfe; background: #f8fbff; }
+  .analyze-grid { grid-template-columns: 400px minmax(0, 1fr); }
+  .search-box { position: relative; }
+  .search-box input { padding-right: 38px; }
+  .search-box kbd {
+    position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+    border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px;
+    background: var(--panel-2); color: var(--muted); font-size: 10px; font-family: inherit; padding: 1px 5px;
+  }
+  .analysis-list { display: grid; gap: 7px; }
+  .analysis-item { text-align: left; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 9px 11px; display: grid; gap: 2px; }
+  .analysis-item:hover { border-color: var(--accent); background: var(--accent-soft); }
   .analysis-item.active { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
   .analysis-item .row { display: flex; align-items: center; gap: 8px; }
-  .analysis-item strong { font-size: 13px; }
-  .analysis-item p { margin: 0; font-size: 11.5px; color: var(--muted); }
+  .analysis-item strong { font-size: 12.8px; }
+  .analysis-item p { margin: 0; font-size: 11.5px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .cat { border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); overflow: hidden; }
+  .cat + .cat { margin-top: 8px; }
+  .cat > summary {
+    list-style: none; cursor: pointer; padding: 9px 11px; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 700; color: var(--ink-2); user-select: none;
+  }
+  .cat > summary::-webkit-details-marker { display: none; }
+  .cat > summary::before { content: "▸"; color: var(--muted); font-size: 10px; transition: transform .15s; }
+  .cat[open] > summary::before { transform: rotate(90deg); }
+  .cat > summary:hover { background: var(--panel-3); }
+  .cat-name { letter-spacing: .01em; }
+  .cat > .analysis-list { padding: 0 8px 8px; }
   .result-block { display: grid; gap: 10px; }
   .result-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
   .result-head h3 { margin: 0; font-size: 17px; letter-spacing: -.02em; }
   .result-head .meta { font-size: 11.5px; color: var(--muted); }
-  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 9px; }
-  .metric { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: #fbfdff; }
+  .metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px, 1fr)); gap: 9px; }
+  .metric { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--panel-2); }
   .metric .name { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
   .metric .number { font-size: 19px; font-weight: 700; letter-spacing: -.03em; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  .narrative { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; padding: 11px 13px; font-size: 13px; color: #1e3a5f; }
+  .narrative { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 10px 10px 0; padding: 11px 13px; font-size: 13px; color: var(--ink-2); }
   .diagnostics { display: grid; gap: 7px; }
-  .diagnostic { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font-size: 12.5px; background: #fff; }
+  .diagnostic { display: flex; gap: 9px; align-items: flex-start; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font-size: 12.5px; background: var(--panel); }
   .diagnostic .badge { flex: 0 0 auto; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 6px; border-radius: 999px; margin-top: 1px; }
   .diagnostic.info .badge { background: var(--accent-soft); color: var(--accent); }
-  .diagnostic.warning { background: var(--warn-soft); border-color: #fde9c4; }
-  .diagnostic.warning .badge { background: #fde9c4; color: var(--warn); }
-  .diagnostic.error { background: var(--danger-soft); border-color: #fecaca; }
-  .diagnostic.error .badge { background: #fecaca; color: var(--danger); }
+  .diagnostic.warning { background: var(--warn-soft); border-color: var(--warn); }
+  .diagnostic.warning .badge { background: var(--warn-soft); color: var(--warn); }
+  .diagnostic.error { background: var(--danger-soft); border-color: var(--danger); }
+  .diagnostic.error .badge { background: var(--danger-soft); color: var(--danger); }
+  .result-head .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .chart-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .chart-card { margin: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 8px; }
+  .chart-card svg { display: block; width: 100%; height: auto; }
+  .chart-card figcaption { padding: 6px 2px 0; font-size: 11.5px; color: var(--muted); }
+
+  /* saved */
+  .saved-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 12px; }
+  .saved-card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 14px; display: grid; gap: 9px; }
+  .saved-card:hover { border-color: var(--muted-2); }
+  .saved-top { display: flex; align-items: flex-start; gap: 10px; }
+  .saved-top h3 { margin: 0; font-size: 14.5px; letter-spacing: -.01em; }
+  .saved-top .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .saved-top .pill { margin-left: auto; }
+  .saved-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+  .saved-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .saved-params { font-size: 11px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 7px; padding: 5px 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* dialogs */
+  dialog.dialog {
+    border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 16px; padding: 0; width: min(720px, calc(100vw - 28px));
+    max-height: calc(100vh - 40px); box-shadow: 0 30px 80px rgba(2, 8, 20, .45);
+  }
+  dialog.dialog::backdrop { background: rgba(3, 10, 24, .58); backdrop-filter: blur(2px); }
+  .dialog-head, .dialog-body, .dialog-foot { padding: 17px 20px; }
+  .dialog-head { display: flex; align-items: flex-start; gap: 12px; border-bottom: 1px solid var(--line-2); }
+  .dialog-head h2 { margin: 2px 0 0; font-size: 18px; letter-spacing: -.02em; }
+  .dialog-head .icon-btn { margin-left: auto; }
+  .dialog-body { display: grid; gap: 13px; overflow: auto; max-height: min(68vh, 620px); }
+  .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line-2); background: var(--panel-2); }
+  .help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .help-card { border: 1px solid var(--line); border-radius: 11px; padding: 12px 13px; background: var(--panel-2); }
+  .help-card h3 { margin: 0 0 5px; font-size: 13px; }
+  .help-card p, .help-card ul { margin: 0; font-size: 12px; color: var(--muted); }
+  .help-card ul { padding-left: 17px; display: grid; gap: 4px; }
+  .help-card kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--panel); padding: 1px 5px; font-family: inherit; font-size: 11px; }
 
   /* toasts and busy */
-  .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: grid; gap: 9px; width: min(360px, calc(100vw - 40px)); }
-  .toast { border: 1px solid var(--line); background: #fff; border-radius: 11px; padding: 11px 13px; box-shadow: 0 12px 32px rgba(15, 23, 42, .16); font-size: 12.5px; border-left: 4px solid var(--accent); }
+  .toasts { position: fixed; right: 20px; bottom: 20px; z-index: 120; display: grid; gap: 9px; width: min(360px, calc(100vw - 40px)); }
+  .toast { border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 11px 13px; box-shadow: 0 12px 32px rgba(15, 23, 42, .2); font-size: 12.5px; border-left: 4px solid var(--accent); }
   .toast.success { border-left-color: var(--ok); }
   .toast.error { border-left-color: var(--danger); }
-  .busy { position: fixed; inset: 0; background: rgba(15, 23, 42, .18); z-index: 55; display: grid; place-items: center; }
+  .busy { position: fixed; inset: 0; background: rgba(15, 23, 42, .2); z-index: 110; display: grid; place-items: center; }
   .spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .5); border-top-color: var(--accent); animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -250,14 +354,15 @@
   }
   @media (max-width: 860px) {
     .app { grid-template-columns: 1fr; }
-    .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: 14px; padding: 12px 14px; overflow-x: auto; }
+    .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: 12px; padding: 11px 13px; overflow-x: auto; }
     .brand-text, .sidebar-note { display: none; }
     .nav { display: flex; gap: 4px; }
     .nav-item { padding: 8px 10px; white-space: nowrap; }
-    .nav-item span { display: none; }
+    .nav-item span:not(.nav-badge) { display: none; }
+    .nav-item .nav-badge { display: none; }
     .nav-item.active { box-shadow: inset 0 -3px 0 #60a5fa; }
-    .topbar { padding: 14px 16px; position: static; }
-    .content { padding: 16px; }
+    .topbar { padding: 13px 15px; position: static; }
+    .content { padding: 15px; }
     .project-banner { flex-direction: column; align-items: flex-start; }
     .project-banner .actions { margin-left: 0; }
   }
@@ -268,33 +373,38 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">DS</div>
-      <div class="brand-text"><strong>Data Studio</strong><span>Analytics workbench</span></div>
+      <div class="brand-text"><strong>Data Studio</strong><span>Local analytics workbench</span></div>
     </div>
     <nav class="nav" aria-label="Workspace sections">
-      <button class="nav-item active" data-view="overview">
+      <button class="nav-item active" data-view="overview" data-tip="Workspace summary, project status and next actions">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
         <span>Overview</span>
       </button>
-      <button class="nav-item" data-view="data">
+      <button class="nav-item" data-view="data" data-tip="Import sources, inspect schemas and preview rows">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
         <span>Data</span>
       </button>
-      <button class="nav-item" data-view="prepare">
+      <button class="nav-item" data-view="prepare" data-tip="Build, reorder and run a validated cleaning pipeline">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h10"/><path d="M18 6h2"/><circle cx="16" cy="6" r="2"/><path d="M4 12h2"/><path d="M10 12h10"/><circle cx="8" cy="12" r="2"/><path d="M4 18h9"/><path d="M17 18h3"/><circle cx="15" cy="18" r="2"/></svg>
         <span>Prepare</span>
       </button>
-      <button class="nav-item" data-view="analyze">
+      <button class="nav-item" data-view="analyze" data-tip="Descriptive, inferential and time-series analyses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
         <span>Analyze</span>
       </button>
-      <button class="nav-item" data-view="export">
+      <button class="nav-item" data-view="saved" data-tip="Saved analyses, freshness status and scheduled refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+        <span>Saved</span>
+        <span class="nav-badge" id="savedNavBadge" hidden>0</span>
+      </button>
+      <button class="nav-item" data-view="export" data-tip="Deliver cleaned data as Parquet, CSV, JSON or Excel">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v3h16v-3"/></svg>
         <span>Export</span>
       </button>
     </nav>
     <div class="sidebar-note">
       <span class="dot"></span> Local workspace
-      <small>Phase 2 · Typed analytics</small>
+      <small id="appVersion">Phase 2 · Typed analytics</small>
     </div>
   </aside>
 
@@ -305,9 +415,11 @@
         <p id="viewSubtitle">Workspace summary and next actions.</p>
       </div>
       <div class="topbar-actions">
-        <button class="chip muted" id="projectChip" title="Project">No project</button>
-        <button class="chip muted" id="datasetChip" title="Dataset">No dataset</button>
-        <button class="btn ghost" id="refreshButton">Refresh</button>
+        <button class="chip muted" id="projectChip" data-tip="Open project — click to return to Overview">No project</button>
+        <button class="chip muted" id="datasetChip" data-tip="Active dataset — click to open Data">No dataset</button>
+        <button class="icon-btn round" id="themeToggle" aria-label="Toggle light and dark theme" data-tip="Toggle light / dark theme">☾</button>
+        <button class="icon-btn round" id="helpButton" aria-label="Open quick help" data-tip="Quick help and shortcuts  (?)">?</button>
+        <button class="btn" id="refreshButton">Refresh</button>
       </div>
     </header>
 
@@ -317,12 +429,13 @@
         <div class="card setup" id="setupPanel">
           <div class="card-head">
             <div><span class="eyebrow">Get started</span><h2>Create or open a project</h2></div>
+            <span class="pill gray">Local only</span>
           </div>
           <div class="card-body">
-            <p class="hint">A project is a folder holding the manifest, dataset snapshots, pipeline and analysis settings. Nothing is written outside it.</p>
+            <p class="hint">A project is a folder holding the manifest, dataset snapshots, pipeline, saved analyses and reports. Nothing is written outside it, and opening a project never executes code.</p>
             <div class="form-grid">
               <label class="field"><span>Project folder</span><input id="projectPath" placeholder="C:\Users\you\Documents\SalesProject"></label>
-              <label class="field"><span>Project name (optional)</span><input id="projectName" placeholder="Sales analysis"></label>
+              <label class="field"><span>Project name <span class="help-dot" tabindex="0" data-tip="Optional. Defaults to the folder name.">?</span></span><input id="projectName" placeholder="Sales analysis"></label>
             </div>
             <div class="actions">
               <button class="btn primary" id="createProject">Create project</button>
@@ -353,6 +466,7 @@
                 <button class="btn" data-goto="data">Manage datasets</button>
                 <button class="btn" data-goto="prepare">Build a pipeline</button>
                 <button class="btn" data-goto="analyze">Run an analysis</button>
+                <button class="btn" data-goto="saved">Review saved analyses</button>
                 <button class="btn" data-goto="export">Export results</button>
               </div>
             </div>
@@ -374,13 +488,13 @@
             </div>
             <div class="card-body">
               <div class="import-box">
-                <input type="file" id="datasetFile" multiple aria-label="Choose data files">
+                <input type="file" id="datasetFile" multiple aria-label="Choose data files" data-tip="CSV, Excel, JSON, Parquet or DuckDB. You can select several files at once.">
                 <div class="inline-input">
-                  <input id="datasetId" placeholder="Dataset id (optional)" aria-label="Dataset id">
+                  <input id="datasetId" placeholder="Dataset id (optional)" aria-label="Dataset id" data-tip="Optional stable name, for example sales. Defaults to the file name.">
                   <button class="btn primary" id="importDataset">Import</button>
                 </div>
               </div>
-              <p class="hint">CSV, Excel, JSON, Parquet or DuckDB. Imports are normalised into project-owned Parquet files.</p>
+              <p class="hint">Imports are normalised into project-owned Parquet snapshots, so analysis never depends on the original file moving.</p>
               <div id="datasetList" class="dataset-list"></div>
               <p class="status" id="datasetStatus"></p>
             </div>
@@ -389,7 +503,7 @@
           <div class="card">
             <div class="card-head">
               <div><span class="eyebrow">Inspector</span><h2 id="datasetHeading">Select a dataset</h2></div>
-              <button class="btn ghost danger sm" id="deleteDataset" hidden>Remove dataset</button>
+              <button class="btn ghost danger sm" id="deleteDataset" hidden data-tip="Remove the dataset snapshot from this project">Remove dataset</button>
             </div>
             <div class="card-body">
               <div class="tabs">
@@ -413,8 +527,8 @@
           <div class="card-head">
             <div><span class="eyebrow">Transformation</span><h2>Pipeline</h2></div>
             <div class="actions">
-              <button class="btn" id="undoStep">Undo last</button>
-              <button class="btn primary" id="runPipeline">Run pipeline</button>
+              <button class="btn" id="undoStep" data-tip="Remove the most recently added step">Undo last</button>
+              <button class="btn primary" id="runPipeline" data-tip="Run every enabled step and preview the cleaned output">Run pipeline</button>
             </div>
           </div>
           <div class="card-body">
@@ -428,7 +542,7 @@
           <div class="card">
             <div class="card-head"><div><span class="eyebrow">Add</span><h2>New step</h2></div></div>
             <div class="card-body">
-              <label class="field"><span>Operation</span><select id="operationSelect"></select></label>
+              <label class="field"><span>Operation <span class="help-dot" tabindex="0" data-tip="Operations are grouped by category. Pick one, fill its parameters, then add it to the pipeline.">?</span></span><select id="operationSelect"></select></label>
               <p class="hint" id="operationHelp"></p>
               <div id="stepForm" class="form-grid"></div>
               <div class="actions"><button class="btn primary" id="addStep">Add step</button></div>
@@ -453,16 +567,23 @@
         <div class="panel-grid analyze-grid">
           <div class="card">
             <div class="card-head">
-              <div><span class="eyebrow">Analyses</span><h2>Choose an analysis</h2></div>
+              <div><span class="eyebrow">Catalog</span><h2>Choose an analysis</h2></div>
               <span class="pill gray" id="analysisCount">0</span>
             </div>
             <div class="card-body">
+              <div class="search-box">
+                <input id="analysisSearch" type="search" placeholder="Search by name, category or description…" aria-label="Search analyses">
+                <kbd>/</kbd>
+              </div>
               <div id="analysisList" class="analysis-list"></div>
               <div class="divider"></div>
-              <h3 class="section-title" id="analysisHeading">Select an analysis</h3>
-              <p class="hint" id="analysisHelp"></p>
+              <div class="section-head">
+                <h3 class="section-title" id="analysisHeading">Select an analysis</h3>
+                <span class="pill gray" id="analysisCategory" hidden></span>
+              </div>
+              <p class="hint" id="analysisHelp">Pick an analysis from the catalog. Categories are collapsible; the search box filters across all of them.</p>
               <div id="analysisForm" class="form-grid"></div>
-              <label class="check"><input type="checkbox" id="usePipeline" checked> Analyze the cleaned pipeline output</label>
+              <label class="check" data-tip="On: analyse the cleaned pipeline output, matching the preview.\nOff: analyse the raw stored dataset."><input type="checkbox" id="usePipeline" checked> Analyze the cleaned pipeline output</label>
               <div class="actions"><button class="btn primary" id="runAnalysis" disabled>Run analysis</button></div>
               <p class="status" id="analysisStatus"></p>
             </div>
@@ -472,7 +593,28 @@
               <div><span class="eyebrow">Result</span><h2>Analysis result</h2></div>
               <span class="pill" id="analysisKind" hidden></span>
             </div>
-            <div class="card-body" id="analysisResult"><p class="empty">Run an analysis to see typed results.</p></div>
+            <div class="card-body" id="analysisResult"><p class="empty">Run an analysis to see typed metrics, tables and charts.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Saved ----------------------------------------------------------->
+      <section data-panel="saved" id="panel-saved" hidden>
+        <div class="card">
+          <div class="card-head">
+            <div><span class="eyebrow">Library</span><h2>Saved analyses</h2></div>
+            <span class="pill gray" id="savedCount">0</span>
+            <div class="actions">
+              <label class="check compact" data-tip="When on, the workspace checks due schedules every minute while this tab is visible."><input type="checkbox" id="autoRefreshSaved" checked> Auto-refresh due</label>
+              <button class="btn" id="refreshDueSaved" data-tip="Refresh only analyses whose schedule is due or whose inputs changed">Refresh due</button>
+              <button class="btn" id="refreshAllSaved" data-tip="Refresh every saved analysis regardless of schedule">Refresh all</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <p class="hint">Saved analyses keep their last typed result as plain JSON under <span class="mono">analyses/</span>. A fingerprint of the dataset checksum, pipeline and app version marks them stale when inputs change. Optional HTML artifacts live under <span class="mono">reports/</span>.</p>
+            <p class="status" id="savedStatus"></p>
+            <div id="savedErrors" class="diagnostics"></div>
+            <div id="savedList" class="saved-grid"></div>
           </div>
         </div>
       </section>
@@ -485,7 +627,7 @@
             <div class="card-body">
               <p class="muted" id="exportContext">Open a project and run a pipeline first.</p>
               <div class="form-grid">
-                <label class="field"><span>Destination</span><input id="exportPath" value="exports/clean.parquet"></label>
+                <label class="field"><span>Destination</span><input id="exportPath" value="exports/clean.parquet" data-tip="Relative paths resolve inside the project folder."></label>
                 <label class="field"><span>Format</span>
                   <select id="exportFormat">
                     <option value="auto">Auto from extension</option>
@@ -498,8 +640,8 @@
               </div>
               <div class="actions">
                 <button class="btn primary" id="exportResult">Export</button>
-                <button class="btn ghost" id="exportCsv">Quick CSV</button>
-                <button class="btn ghost" id="exportJson">Quick JSON</button>
+                <button class="btn ghost" id="exportCsv" data-tip="Set the destination to exports/clean.csv and export">Quick CSV</button>
+                <button class="btn ghost" id="exportJson" data-tip="Set the destination to exports/clean.json and export">Quick JSON</button>
               </div>
               <p class="status" id="exportStatus"></p>
             </div>
@@ -520,10 +662,108 @@
     </main>
   </div>
 </div>
+<!-- Save analysis dialog -->
+<dialog class="dialog" id="saveDialog">
+  <form id="saveForm" novalidate>
+    <div class="dialog-head">
+      <div><span class="eyebrow">Saved analyses</span><h2>Save this analysis</h2></div>
+      <button class="icon-btn round" type="button" id="saveClose" aria-label="Close">✕</button>
+    </div>
+    <div class="dialog-body">
+      <p class="hint">Saved analyses keep their last result and refresh when their inputs change or their schedule is due. They are plain JSON documents inside the project.</p>
+      <div class="form-grid">
+        <label class="field"><span>Name <span class="help-dot" tabindex="0" data-tip="Used for the file id. Letters, digits and dashes; duplicates get -2, -3, and so on.">?</span></span><input id="saveName" required placeholder="Monthly revenue"></label>
+        <label class="field"><span>Display title</span><input id="saveTitle" placeholder="Defaults to the analysis title"></label>
+        <label class="field span-2"><span>Refresh schedule</span>
+          <select id="saveSchedule">
+            <option value="manual">Manual only</option>
+            <option value="on_open">On project open</option>
+            <option value="hourly">Hourly</option>
+            <option value="daily">Daily</option>
+          </select>
+          <small>Due schedules run when the workspace opens, on the minute timer, or from <span class="mono">data-studio refresh --due</span>.</small>
+        </label>
+      </div>
+      <label class="check" data-tip="Writes a self-contained HTML report under reports/ on every save and refresh."><input type="checkbox" id="saveReport" checked> Also write an HTML report under <span class="mono">reports/</span></label>
+      <label class="check" data-tip="Replace the existing document with the same name instead of creating a suffix."><input type="checkbox" id="saveOverwrite"> Replace an existing saved analysis with the same name</label>
+      <p class="status" id="saveStatus"></p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn" type="button" id="saveCancel">Cancel</button>
+      <button class="btn primary" type="submit">Save analysis</button>
+    </div>
+  </form>
+</dialog>
 
+<!-- Help dialog -->
+<dialog class="dialog" id="helpDialog">
+  <div class="dialog-head">
+    <div><span class="eyebrow">Quick help</span><h2>How Data Studio works</h2></div>
+    <button class="icon-btn round" type="button" id="helpClose" aria-label="Close">✕</button>
+  </div>
+  <div class="dialog-body">
+    <p class="hint">Data Studio is a local-first analytics workbench. Everything is stored in a folder you choose, and opening a project never executes code.</p>
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>Typical workflow</h3>
+        <ul>
+          <li><strong>Data</strong> — import CSV, Excel, JSON, Parquet or DuckDB.</li>
+          <li><strong>Prepare</strong> — add cleaning steps and preview the result.</li>
+          <li><strong>Analyze</strong> — run typed descriptive, inferential or time-series analyses.</li>
+          <li><strong>Saved</strong> — keep results, refresh on a schedule and download reports.</li>
+          <li><strong>Export</strong> — write cleaned data as Parquet, CSV, JSON or Excel.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Analysis categories</h3>
+        <ul>
+          <li><strong>Descriptive</strong> — summaries, distributions, frequency tables and cross-tabs.</li>
+          <li><strong>Inference</strong> — hypothesis tests, confidence intervals and effect sizes.</li>
+          <li><strong>Time series</strong> — trend, seasonality, ACF/PACF and ARIMA forecasts.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Freshness and schedules</h3>
+        <ul>
+          <li><strong>Fresh</strong> — inputs and app version match the saved fingerprint.</li>
+          <li><strong>Stale</strong> — data or pipeline changed; refresh to update.</li>
+          <li><strong>Missing</strong> — the dataset is no longer in the project.</li>
+          <li>Schedules: manual, on project open, hourly or daily.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Keyboard shortcuts</h3>
+        <ul>
+          <li><kbd>?</kbd> — open this help.</li>
+          <li><kbd>/</kbd> — focus the analysis search while in Analyze.</li>
+          <li><kbd>Esc</kbd> — close a dialog or tooltip.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Data safety</h3>
+        <ul>
+          <li>No pickle: projects are JSON, Parquet and JSON only.</li>
+          <li>Dataset paths stay inside the project folder.</li>
+          <li>Reports are self-contained HTML with no scripts.</li>
+          <li>Refreshes are explicit; there is no background daemon.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Tips</h3>
+        <ul>
+          <li>Hover or focus any <span class="help-dot" tabindex="0" data-tip="Small help dots like this explain a control without taking up space.">?</span> for contextual help.</li>
+          <li>Analyse the pipeline output to match the cleaned preview.</li>
+          <li>Save an analysis to compare fresh results over time.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-foot"><button class="btn" type="button" id="helpDone">Got it</button></div>
+</dialog>
+
+<div class="tooltip" id="tooltip" role="tooltip"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="busy" id="busy" hidden><div class="spinner" aria-label="Working"></div></div>
-
 <script>
 const state = {
   project: null,
@@ -538,15 +778,39 @@ const state = {
   run: null,
   selectedAnalysis: null,
   analysisResult: null,
+  lastAnalysisRequest: null,
+  saved: [],
+  savedErrors: [],
+  savedSchedules: ["manual", "on_open", "hourly", "daily"],
+  autoRefresh: localStorage.getItem("dataStudio.autoRefresh") !== "false",
+  collapsedCategories: new Set(),
+  analysisQuery: "",
+  view: "overview",
+  meta: null,
   busy: 0
 };
 
 const VIEW_META = {
   overview: ["Overview", "Workspace summary and next actions."],
   data: ["Data", "Import sources, inspect schemas and preview rows."],
-  prepare: ["Prepare", "Build and run a validated pipeline."],
-  analyze: ["Analyze", "Run descriptive, inferential and regression analyses."],
+  prepare: ["Prepare", "Build and run a validated cleaning pipeline."],
+  analyze: ["Analyze", "Descriptive, inferential, time-series and forecasting analyses."],
+  saved: ["Saved", "Persisted analyses, freshness and scheduled refresh."],
   export: ["Export", "Deliver cleaned data in a shareable format."]
+};
+
+const CATEGORY_HELP = {
+  summary: "Row and column summaries, missingness and numeric profiles.",
+  distribution: "Crosstabs, value counts and distribution shape.",
+  quality: "Completeness checks and data-quality diagnostics.",
+  relationship: "Correlation and association between columns.",
+  regression: "Model relationships and compare model specifications.",
+  inference: "Hypothesis tests, confidence intervals and effect sizes.",
+  forecasting: "Time-series models, forecasts and backtests.",
+  time_series: "Trend, seasonality, ACF/PACF and forecasting for ordered data.",
+  "time series": "Trend, seasonality, ACF/PACF and forecasting for ordered data.",
+  descriptive: "Summaries, distributions, frequency tables and cross-tabs.",
+  timeseries: "Trend, seasonality, ACF/PACF and forecasting for ordered data."
 };
 
 /* -- small helpers ------------------------------------------------------- */
@@ -633,6 +897,110 @@ function formatCell(value) {
   return document.createTextNode(String(value));
 }
 
+function fmtTime(value) {
+  if (!value) return "never";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function humanize(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function categoryHelp(category) {
+  return CATEGORY_HELP[String(category).toLowerCase()] || `Analyses in the ${humanize(category)} family.`;
+}
+
+function helpDot(text) {
+  return el("span", { class: "help-dot", tabindex: "0", "data-tip": text, "aria-label": text, text: "?" });
+}
+
+/* -- theme --------------------------------------------------------------- */
+function currentTheme() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+function applyTheme(theme, persist = true) {
+  const next = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  if (persist) localStorage.setItem("dataStudio.theme", next);
+  const button = document.getElementById("themeToggle");
+  if (button) {
+    button.textContent = next === "dark" ? "☀" : "☾";
+    button.setAttribute("aria-label", next === "dark" ? "Switch to light theme" : "Switch to dark theme");
+    button.setAttribute("data-tip", next === "dark" ? "Switch to light theme" : "Switch to dark theme");
+  }
+  if (state.analysisResult) hydrateAnalysisCharts(state.analysisResult, true);
+}
+
+/* -- tooltips ------------------------------------------------------------ */
+function ensureTooltip() {
+  let node = document.getElementById("tooltip");
+  if (!node) {
+    node = el("div", { id: "tooltip", class: "tooltip", role: "tooltip" });
+    document.body.append(node);
+  }
+  return node;
+}
+
+function showTip(target) {
+  const text = target.getAttribute("data-tip");
+  if (!text) return;
+  const node = ensureTooltip();
+  node.textContent = text;
+  node.classList.add("visible");
+  const rect = target.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  let left = rect.left + rect.width / 2 - box.width / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - box.width - 8));
+  let top = rect.bottom + 8;
+  if (top + box.height > window.innerHeight - 8) top = rect.top - box.height - 8;
+  node.style.left = `${Math.round(left)}px`;
+  node.style.top = `${Math.round(Math.max(8, top))}px`;
+}
+
+function hideTip() {
+  const node = document.getElementById("tooltip");
+  if (node) node.classList.remove("visible");
+}
+
+function bindTooltips() {
+  document.addEventListener("pointerover", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (target) showTip(target);
+  });
+  document.addEventListener("pointerout", (event) => {
+    if (event.target.closest("[data-tip]")) hideTip();
+  });
+  document.addEventListener("focusin", (event) => {
+    const target = event.target.closest("[data-tip]");
+    if (target) showTip(target);
+  });
+  document.addEventListener("focusout", hideTip);
+  window.addEventListener("scroll", hideTip, true);
+  window.addEventListener("resize", hideTip);
+}
+
+/* -- dialogs ------------------------------------------------------------- */
+function showDialog(id) {
+  const dialog = document.getElementById(id);
+  if (!dialog) return;
+  if (typeof dialog.showModal === "function") {
+    try { dialog.showModal(); return; } catch (_) { /* fall through */ }
+  }
+  dialog.setAttribute("open", "");
+}
+
+function closeDialog(id) {
+  const dialog = document.getElementById(id);
+  if (!dialog) return;
+  if (typeof dialog.close === "function") dialog.close();
+  else dialog.removeAttribute("open");
+  hideTip();
+}
+
 /* -- navigation ---------------------------------------------------------- */
 function navigate(view) {
   const [title, subtitle] = VIEW_META[view] || VIEW_META.overview;
@@ -648,6 +1016,7 @@ function navigate(view) {
   if (view === "data") renderData();
   if (view === "prepare") renderPipeline();
   if (view === "analyze") renderAnalysisResult();
+  if (view === "saved") renderSaved();
   if (view === "export") renderExportContext();
 }
 
@@ -663,6 +1032,7 @@ function renderProject() {
     projectChip.textContent = state.project.name;
     projectChip.classList.remove("muted");
     projectChip.title = state.project.root;
+    projectChip.setAttribute("data-tip", `Open project: ${state.project.root}`);
     document.getElementById("overviewProjectName").textContent = state.project.name;
     document.getElementById("overviewProjectRoot").textContent = state.project.root;
     document.getElementById("projectPath").value = state.project.root;
@@ -671,15 +1041,18 @@ function renderProject() {
     projectChip.textContent = "No project";
     projectChip.classList.add("muted");
     projectChip.title = "No project open";
+    projectChip.setAttribute("data-tip", "No project open — create or open one on Overview");
   }
   const selected = state.datasets.find((item) => item.id === state.selectedDataset);
   datasetChip.textContent = selected ? `Dataset: ${selected.id}` : "No dataset";
   datasetChip.classList.toggle("muted", !selected);
+  datasetChip.setAttribute("data-tip", selected ? `Active dataset: ${selected.id}` : "No dataset selected");
   renderKpi();
 }
 
 function renderKpi() {
   const container = document.getElementById("kpiGrid");
+  if (!container) return;
   const rows = state.datasets.reduce((total, item) => total + (item.rows || 0), 0);
   const steps = state.pipeline ? state.pipeline.steps.length : 0;
   const enabled = state.pipeline ? state.pipeline.steps.filter((step) => step.enabled !== false).length : 0;
@@ -687,7 +1060,8 @@ function renderKpi() {
     ["Datasets", state.datasets.length.toLocaleString(), "Sources in this project"],
     ["Rows", rows.toLocaleString(), "Across all datasets"],
     ["Pipeline steps", steps.toLocaleString(), `${enabled} enabled`],
-    ["Analyses", state.analyses.length.toLocaleString(), "Descriptive, inference and regression"]
+    ["Analyses", state.analyses.length.toLocaleString(), "Available in the catalog"],
+    ["Saved", state.saved.length.toLocaleString(), "Persisted with refresh status"]
   ];
   container.replaceChildren(...cards.map(([label, value, sub]) =>
     el("div", { class: "kpi" },
@@ -722,6 +1096,7 @@ async function refreshProject() {
   state.root = payload.root;
   if (state.project) {
     await Promise.all([refreshDatasets(), refreshPipeline()]);
+    await refreshSaved({ quiet: true });
   } else {
     state.datasets = [];
     state.pipeline = null;
@@ -729,11 +1104,14 @@ async function refreshProject() {
     state.schema = null;
     state.preview = null;
     state.run = null;
+    state.saved = [];
+    state.savedErrors = [];
     renderDatasets();
     renderSchema();
     renderPreview();
     renderPipeline();
     renderData();
+    renderSaved();
   }
   renderProject();
 }
@@ -804,7 +1182,7 @@ function renderDatasets() {
   }
   for (const dataset of state.datasets) {
     const active = dataset.id === state.selectedDataset;
-    const button = el("button", { class: `dataset-item ${active ? "active" : ""}`, type: "button" },
+    const button = el("button", { class: `dataset-item ${active ? "active" : ""}`, type: "button", "data-tip": `${dataset.id} · ${dataset.rows === null ? "?" : dataset.rows.toLocaleString()} rows · ${dataset.columns} columns` },
       el("div", { class: "ds-main" },
         el("strong", { text: dataset.id }),
         el("span", { class: "meta", text: `${dataset.rows === null ? "?" : dataset.rows.toLocaleString()} rows · ${dataset.columns} columns` })
@@ -825,6 +1203,7 @@ function renderData() {
 
 function renderSchema() {
   const container = document.getElementById("schemaTable");
+  if (!container) return;
   container.replaceChildren();
   if (!state.schema || !state.schema.columns.length) {
     container.append(el("p", { class: "empty", text: "Select a dataset to inspect its schema." }));
@@ -850,6 +1229,7 @@ function renderSchema() {
 
 function renderPreview() {
   const container = document.getElementById("previewTable");
+  if (!container) return;
   if (!state.preview || !state.preview.schema || !state.preview.schema.columns.length) {
     container.replaceChildren(el("p", { class: "empty", text: "Select a dataset to preview rows." }));
     return;
@@ -868,7 +1248,7 @@ function renderOperationOptions() {
     groups.get(operation.category).push(operation);
   }
   for (const category of [...groups.keys()].sort()) {
-    const group = el("optgroup", { label: category });
+    const group = el("optgroup", { label: humanize(category) });
     for (const operation of groups.get(category).sort((a, b) => a.title.localeCompare(b.title))) {
       group.append(el("option", { value: operation.name, text: operation.title }));
     }
@@ -883,14 +1263,24 @@ function currentOperation() {
   return state.operations.find((item) => item.name === name) || null;
 }
 
+function operationHelpText(operation) {
+  if (!operation) return "";
+  const names = operation.params.map((param) => `${param.name}${param.required ? "" : "?"}`).join(", ");
+  return `${operation.description} Parameters: ${names || "(none)"}.`;
+}
+
 function updateOperationHelp() {
   const operation = currentOperation();
+  const select = document.getElementById("operationSelect");
+  const help = document.getElementById("operationHelp");
   if (!operation) {
-    document.getElementById("operationHelp").textContent = "";
+    if (help) help.textContent = "";
+    if (select) select.removeAttribute("data-tip");
     return;
   }
-  const names = operation.params.map((param) => `${param.name}${param.required ? "" : "?"}`).join(", ");
-  document.getElementById("operationHelp").textContent = `${operation.description} Parameters: ${names || "(none)"}.`;
+  const text = operationHelpText(operation);
+  if (help) help.textContent = text;
+  if (select) select.setAttribute("data-tip", text);
 }
 
 function defaultText(param) {
@@ -953,13 +1343,17 @@ function makeControl(param, prefix) {
 function renderParamForm(container, params, prefix) {
   container.replaceChildren();
   if (!params.length) {
-    container.append(el("p", { class: "hint wide", text: "This operation has no parameters." }));
+    container.append(el("p", { class: "hint wide", text: "This step has no parameters." }));
     return;
   }
   for (const param of params) {
     const control = makeControl(param, prefix);
+    const label = el("span", { class: "field-label" },
+      el("span", { text: humanize(param.name) + (param.required ? " *" : "") }),
+      param.description ? helpDot(param.description) : null
+    );
     const field = el("label", { class: `field ${param.kind === "mapping" || param.kind === "aggregations" || param.kind === "any" ? "wide" : ""}` },
-      el("span", { text: param.name + (param.required ? " *" : "") }),
+      label,
       control,
       el("small", { text: `${param.kind}${param.description ? " · " + param.description : ""}` })
     );
@@ -967,9 +1361,26 @@ function renderParamForm(container, params, prefix) {
   }
 }
 
+function applyParamValues(container, params) {
+  for (const control of container.querySelectorAll("[data-param]")) {
+    const name = control.dataset.param;
+    if (!(name in params)) continue;
+    const value = params[name];
+    const kind = control.dataset.kind;
+    const input = kind === "boolean" && control.matches("label") ? control.querySelector("input") : control;
+    if (!input) continue;
+    if (kind === "boolean") input.checked = Boolean(value);
+    else if (kind === "columns") input.value = Array.isArray(value) ? value.join(", ") : String(value);
+    else if (kind === "mapping" || kind === "aggregations" || kind === "any") {
+      input.value = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    } else input.value = value === null || value === undefined ? "" : String(value);
+  }
+}
+
 function renderStepForm() {
   const operation = currentOperation();
   const container = document.getElementById("stepForm");
+  if (!container) return;
   if (!operation) {
     container.replaceChildren();
     return;
@@ -1043,6 +1454,7 @@ async function moveStep(index, direction) {
 function renderPipeline() {
   const list = document.getElementById("stepList");
   const meta = document.getElementById("pipelineMeta");
+  if (!list || !meta) return;
   list.replaceChildren();
   meta.replaceChildren();
   if (!state.pipeline) {
@@ -1073,17 +1485,17 @@ function renderPipeline() {
       )
     );
     const actions = el("div", { class: "step-actions" });
-    const up = el("button", { class: "icon-btn", type: "button", text: "↑", disabled: index === 0 });
+    const up = el("button", { class: "icon-btn", type: "button", text: "↑", disabled: index === 0, "data-tip": "Move this step earlier" });
     up.addEventListener("click", () => moveStep(index, -1));
-    const down = el("button", { class: "icon-btn", type: "button", text: "↓", disabled: index === steps.length - 1 });
+    const down = el("button", { class: "icon-btn", type: "button", text: "↓", disabled: index === steps.length - 1, "data-tip": "Move this step later" });
     down.addEventListener("click", () => moveStep(index, 1));
-    const toggle = el("button", { class: "icon-btn", type: "button", text: step.enabled === false ? "Enable" : "Disable" });
+    const toggle = el("button", { class: "icon-btn", type: "button", text: step.enabled === false ? "Enable" : "Disable", "data-tip": step.enabled === false ? "Include this step when running" : "Skip this step when running" });
     toggle.addEventListener("click", () => task(
       () => putPipeline(steps.map((item) => item.id === step.id ? { ...item, enabled: step.enabled === false } : item)),
       "stepStatus",
       "Step updated."
     ));
-    const remove = el("button", { class: "icon-btn danger", type: "button", text: "Remove" });
+    const remove = el("button", { class: "icon-btn danger", type: "button", text: "Remove", "data-tip": "Delete this step from the pipeline" });
     remove.addEventListener("click", () => task(async () => {
       state.pipeline = await api(`/api/v1/pipeline/steps/${encodeURIComponent(step.id)}`, { method: "DELETE" });
       renderPipeline();
@@ -1094,47 +1506,84 @@ function renderPipeline() {
   });
   renderKpi();
 }
-
 /* -- analyses ------------------------------------------------------------ */
 function renderAnalysisList() {
   const list = document.getElementById("analysisList");
   if (!list) return;
   list.replaceChildren();
-  document.getElementById("analysisCount").textContent = state.analyses.length;
+  const query = state.analysisQuery.trim().toLowerCase();
+  const filtered = state.analyses.filter((analysis) => {
+    if (!query) return true;
+    return [analysis.title, analysis.description, analysis.category, analysis.name]
+      .join(" ").toLowerCase().includes(query);
+  });
+  document.getElementById("analysisCount").textContent = filtered.length;
   if (!state.analyses.length) {
     list.append(el("p", { class: "empty", text: "No analyses available." }));
     return;
   }
+  if (!filtered.length) {
+    list.append(el("p", { class: "empty", text: `No analyses match “${state.analysisQuery.trim()}”.` }));
+    return;
+  }
   const groups = new Map();
-  for (const analysis of state.analyses) {
+  for (const analysis of filtered) {
     if (!groups.has(analysis.category)) groups.set(analysis.category, []);
     groups.get(analysis.category).push(analysis);
   }
+  const searching = Boolean(query);
   for (const category of [...groups.keys()].sort()) {
-    list.append(el("div", { class: "eyebrow", text: category }));
-    for (const analysis of groups.get(category).sort((a, b) => a.title.localeCompare(b.title))) {
+    const items = groups.get(category).sort((a, b) => a.title.localeCompare(b.title));
+    const details = el("details", { class: "cat" });
+    if (searching || !state.collapsedCategories.has(category)) details.open = true;
+    const summary = el("summary", { class: "cat-head", "data-tip": categoryHelp(category) },
+      el("span", { class: "cat-name", text: humanize(category) }),
+      el("span", { class: "pill gray", text: String(items.length) })
+    );
+    details.append(summary);
+    const body = el("div", { class: "analysis-list" });
+    for (const analysis of items) {
       const active = state.selectedAnalysis && state.selectedAnalysis.name === analysis.name;
-      const button = el("button", { class: `analysis-item ${active ? "active" : ""}`, type: "button" },
+      const paramNames = analysis.params.map((param) => param.name).join(", ");
+      const button = el("button", {
+        class: `analysis-item ${active ? "active" : ""}`,
+        type: "button",
+        "data-tip": `${analysis.description}\nParameters: ${paramNames || "(none)"}`
+      },
         el("div", { class: "row" }, el("strong", { text: analysis.title }), el("span", { class: "pill gray", text: analysis.category })),
         el("p", { text: analysis.description })
       );
       button.addEventListener("click", () => selectAnalysis(analysis));
-      list.append(button);
+      body.append(button);
     }
+    details.append(body);
+    details.addEventListener("toggle", () => {
+      if (details.open) state.collapsedCategories.delete(category);
+      else state.collapsedCategories.add(category);
+    });
+    list.append(details);
   }
 }
 
-function selectAnalysis(analysis) {
+function focusAnalysis(analysis, params) {
   state.selectedAnalysis = analysis;
-  state.analysisResult = null;
   document.getElementById("analysisHeading").textContent = analysis.title;
   document.getElementById("analysisHelp").textContent = analysis.description;
+  document.getElementById("analysisCategory").hidden = false;
+  document.getElementById("analysisCategory").textContent = humanize(analysis.category);
   document.getElementById("runAnalysis").disabled = false;
-  document.getElementById("analysisKind").hidden = true;
-  document.getElementById("analysisForm").replaceChildren();
-  renderParamForm(document.getElementById("analysisForm"), analysis.params, "analysis");
-  setStatus("analysisStatus", "");
+  const form = document.getElementById("analysisForm");
+  renderParamForm(form, analysis.params, "analysis");
+  if (params) applyParamValues(form, params);
   renderAnalysisList();
+}
+
+function selectAnalysis(analysis) {
+  state.analysisResult = null;
+  state.lastAnalysisRequest = null;
+  focusAnalysis(analysis, null);
+  document.getElementById("analysisKind").hidden = true;
+  setStatus("analysisStatus", "");
   renderAnalysisResult();
 }
 
@@ -1164,6 +1613,7 @@ async function runAnalysis() {
   );
   if (result) {
     state.analysisResult = result;
+    state.lastAnalysisRequest = payload;
     renderAnalysisResult();
     toast(`${result.title} completed.`, "success");
   }
@@ -1174,7 +1624,7 @@ function renderAnalysisResult() {
   if (!container) return;
   const result = state.analysisResult;
   if (!result) {
-    container.replaceChildren(el("p", { class: "empty", text: "Run an analysis to see typed results." }));
+    container.replaceChildren(el("p", { class: "empty", text: "Run an analysis to see typed metrics, tables and charts." }));
     document.getElementById("analysisKind").hidden = true;
     return;
   }
@@ -1187,13 +1637,17 @@ function renderAnalysisResult() {
     el("div", {},
       el("h3", { text: result.title }),
       el("div", { class: "meta", text: `${provenance.dataset || ""} · ${provenance.step_ids ? provenance.step_ids.length : 0} pipeline step(s) · ${provenance.engine || "duckdb"} · ${result.result_id}` })
+    ),
+    el("div", { class: "actions" },
+      el("button", { class: "btn primary", type: "button", id: "saveAnalysisResult", text: "Save analysis", onclick: openSaveDialog, "data-tip": "Persist this result, choose a refresh schedule and optionally write an HTML report" }),
+      el("button", { class: "btn", type: "button", id: "exportReport", text: "Download HTML", onclick: exportAnalysisReport, "data-tip": "Write a self-contained report under reports/ and download it" })
     )
   ));
 
   const metrics = Object.entries(result.metrics || {});
   if (metrics.length) {
     blocks.push(el("div", { class: "metric-grid" },
-      ...metrics.map(([name, value]) => el("div", { class: "metric" },
+      ...metrics.map(([name, value]) => el("div", { class: "metric", "data-tip": name },
         el("div", { class: "name", text: name.replace(/_/g, " ") }),
         el("div", { class: "number", text: formatNumber(value) })
       ))
@@ -1216,14 +1670,346 @@ function renderAnalysisResult() {
     ));
   }
   if (result.charts && result.charts.length) {
-    blocks.push(el("div", { class: "hint", text: `${result.charts.length} chart specification(s) stored with this result. Interactive rendering arrives in Phase 2C.` }));
+    blocks.push(el("div", { class: "result-block" },
+      el("h3", { class: "section-title", text: "Charts" }),
+      el("div", { class: "chart-grid", id: "analysisCharts" },
+        el("p", { class: "hint", text: "Rendering charts…" })
+      )
+    ));
   }
   container.replaceChildren(...blocks.filter(Boolean));
+  hydrateAnalysisCharts(result);
+}
+
+async function hydrateAnalysisCharts(result, force = false) {
+  if (!result.charts || !result.charts.length) return;
+  const node = document.getElementById("analysisCharts");
+  if (!node) return;
+  try {
+    const response = await api("/api/v1/charts/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ charts: result.charts, theme: currentTheme() })
+    });
+    const figures = (response.svgs || []).map((svg, index) => {
+      const chart = result.charts[index] || {};
+      return el("figure", { class: "chart-card", html: svg },
+        el("figcaption", { text: chart.title || "" })
+      );
+    });
+    node.replaceChildren(...figures);
+  } catch (error) {
+    if (!force) node.replaceChildren(el("p", { class: "hint", text: `Charts unavailable: ${error.message}` }));
+  }
+}
+
+async function exportAnalysisReport() {
+  const result = state.analysisResult;
+  const request = state.lastAnalysisRequest;
+  if (!result || !request) return;
+  const payload = {
+    ...request,
+    theme: currentTheme(),
+    title: `${result.title} report`
+  };
+  const response = await task(
+    () => api("/api/v1/analyses/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }),
+    "analysisStatus",
+    "Report exported."
+  );
+  if (!response) return;
+  const blob = new Blob([response.html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "data-studio-report.html";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`Report saved to ${response.relative_path}.`, "success");
+}
+
+/* -- save analysis dialog ------------------------------------------------ */
+function openSaveDialog() {
+  if (!state.analysisResult || !state.lastAnalysisRequest) {
+    toast("Run an analysis before saving it.", "error");
+    return;
+  }
+  const fallback = (state.selectedAnalysis && state.selectedAnalysis.title) || state.analysisResult.title || "Saved analysis";
+  document.getElementById("saveName").value = fallback;
+  document.getElementById("saveTitle").value = "";
+  document.getElementById("saveSchedule").value = "manual";
+  document.getElementById("saveReport").checked = true;
+  document.getElementById("saveOverwrite").checked = false;
+  setStatus("saveStatus", "");
+  showDialog("saveDialog");
+}
+
+async function submitSaveAnalysis(event) {
+  event.preventDefault();
+  const request = state.lastAnalysisRequest;
+  if (!request) {
+    setStatus("saveStatus", "Run an analysis before saving it.", true);
+    return;
+  }
+  const name = document.getElementById("saveName").value.trim();
+  if (!name) {
+    setStatus("saveStatus", "Enter a name for the saved analysis.", true);
+    return;
+  }
+  const payload = {
+    name,
+    title: document.getElementById("saveTitle").value.trim() || null,
+    analysis: request.analysis,
+    params: request.params,
+    dataset: request.dataset,
+    use_pipeline: request.use_pipeline,
+    schedule: document.getElementById("saveSchedule").value,
+    report: document.getElementById("saveReport").checked,
+    overwrite: document.getElementById("saveOverwrite").checked
+  };
+  const saved = await task(
+    () => api("/api/v1/saved-analyses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }),
+    "saveStatus",
+    "Saved."
+  );
+  if (!saved) return;
+  closeDialog("saveDialog");
+  await refreshSaved({ quiet: true });
+  toast(`Saved “${saved.title}” as ${saved.id}.`, "success");
+  if (state.view !== "saved") navigate("saved");
+}
+/* -- saved analyses ------------------------------------------------------ */
+function statusPillClass(status) {
+  if (status === "fresh") return "green";
+  if (status === "stale") return "warn";
+  return "red";
+}
+
+async function refreshSaved({ quiet = false } = {}) {
+  if (!state.project) {
+    state.saved = [];
+    state.savedErrors = [];
+    renderSaved();
+    return;
+  }
+  try {
+    const payload = await api("/api/v1/saved-analyses");
+    state.saved = payload.analyses || [];
+    state.savedErrors = payload.errors || [];
+    if (Array.isArray(payload.schedules)) state.savedSchedules = payload.schedules;
+  } catch (error) {
+    state.savedErrors = [error.message];
+    if (!quiet) toast(error.message, "error");
+  }
+  renderSaved();
+}
+
+function renderSaved() {
+  const list = document.getElementById("savedList");
+  if (!list) return;
+  const badge = document.getElementById("savedNavBadge");
+  document.getElementById("savedCount").textContent = state.saved.length;
+  if (badge) {
+    badge.hidden = state.saved.length === 0;
+    badge.textContent = String(state.saved.length);
+  }
+  document.getElementById("autoRefreshSaved").checked = state.autoRefresh;
+
+  const errors = document.getElementById("savedErrors");
+  errors.replaceChildren(...state.savedErrors.map((message) =>
+    el("div", { class: "diagnostic error" },
+      el("span", { class: "badge", text: "error" }),
+      el("div", { text: message })
+    )
+  ));
+
+  setStatus(
+    "savedStatus",
+    state.project
+      ? (state.saved.length
+        ? `${state.saved.length} saved analysis(es) · auto-refresh ${state.autoRefresh ? "on" : "off"} while the tab is visible.`
+        : "No saved analyses yet. Run an analysis and choose Save analysis.")
+      : "Open a project to use saved analyses."
+  );
+  renderKpi();
+
+  list.replaceChildren();
+  if (!state.saved.length) {
+    list.append(el("div", { class: "saved-card" },
+      el("p", { class: "empty", text: state.project
+        ? "Nothing saved yet. Run an analysis, then choose Save analysis to keep its result and freshness status."
+        : "Open a project first." })
+    ));
+    return;
+  }
+
+  for (const item of state.saved) {
+    const pill = statusPillClass(item.status);
+    const params = JSON.stringify(item.params || {});
+    const card = el("article", { class: "saved-card" },
+      el("div", { class: "saved-top" },
+        el("div", {},
+          el("h3", { text: item.title }),
+          el("div", { class: "meta mono", text: item.id })
+        ),
+        el("span", { class: `pill ${pill}`, text: item.status })
+      ),
+      el("div", { class: "saved-meta" },
+        el("span", { class: "pill gray", text: item.analysis }),
+        el("span", { class: "pill gray", text: `Schedule: ${humanize(item.schedule)}` }),
+        item.use_pipeline
+          ? el("span", { class: "pill", text: "Pipeline" })
+          : el("span", { class: "pill gray", text: "Raw data" })
+      ),
+      el("p", { class: "hint", text: `Refreshed ${fmtTime(item.refreshed_at)}${item.next_refresh ? ` · next ${fmtTime(item.next_refresh)}` : ""}` }),
+      item.report_path ? el("p", { class: "hint mono", text: item.report_path }) : null,
+      params !== "{}" ? el("div", { class: "saved-params mono", text: params, "data-tip": params }) : null
+    );
+    const actions = el("div", { class: "saved-actions" });
+    const view = el("button", { class: "btn sm primary", type: "button", text: "View result", "data-tip": "Open the last saved result in the Analyze view" });
+    view.addEventListener("click", () => openSaved(item.id));
+    const refresh = el("button", { class: "btn sm", type: "button", text: "Refresh", "data-tip": "Re-run against the current data and pipeline" });
+    refresh.addEventListener("click", () => refreshSavedOne(item.id));
+    actions.append(view, refresh);
+    if (item.report_path) {
+      const report = el("button", { class: "btn sm", type: "button", text: "Report", "data-tip": `Download ${item.report_path}` });
+      report.addEventListener("click", () => downloadSavedReport(item.id));
+      actions.append(report);
+    }
+    const remove = el("button", { class: "btn sm danger", type: "button", text: "Delete", "data-tip": "Delete the saved JSON document (the report artifact is kept)" });
+    remove.addEventListener("click", () => removeSaved(item.id));
+    actions.append(remove);
+    card.append(actions);
+    list.append(card);
+  }
+}
+
+async function openSaved(id) {
+  const saved = await task(
+    () => api(`/api/v1/saved-analyses/${encodeURIComponent(id)}`),
+    null,
+    ""
+  );
+  if (!saved) return;
+  if (!saved.result) {
+    toast("This saved analysis has no result yet. Refresh it first.", "error");
+    return;
+  }
+  const analysis = state.analyses.find((item) => item.name === saved.analysis);
+  if (analysis) focusAnalysis(analysis, saved.params);
+  state.analysisResult = saved.result;
+  state.lastAnalysisRequest = {
+    analysis: saved.analysis,
+    params: saved.params,
+    dataset: saved.dataset,
+    use_pipeline: saved.use_pipeline !== false
+  };
+  document.getElementById("usePipeline").checked = saved.use_pipeline !== false;
+  navigate("analyze");
+  renderAnalysisResult();
+  toast(`Opened “${saved.title}”.`, "success");
+}
+
+async function refreshSavedOne(id) {
+  const updated = await task(
+    () => api(`/api/v1/saved-analyses/${encodeURIComponent(id)}/refresh`, { method: "POST" }),
+    "savedStatus",
+    "Saved analysis refreshed."
+  );
+  if (!updated) return;
+  await refreshSaved({ quiet: true });
+  toast(`Refreshed “${updated.title}”.`, "success");
+}
+
+async function refreshSavedSet(due) {
+  const payload = await task(
+    () => api("/api/v1/saved-analyses/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ due })
+    }),
+    "savedStatus",
+    due ? "Checked due schedules." : "Refreshed all saved analyses."
+  );
+  if (!payload) return;
+  await refreshSaved({ quiet: true });
+  const count = (payload.analyses || []).length;
+  setStatus("savedStatus", count ? `Refreshed ${count} saved analysis(es).` : "Nothing was due.");
+  if (payload.failed && payload.failed.length) {
+    toast(`${payload.failed.length} saved analysis(es) failed to refresh.`, "error");
+  } else if (count) {
+    toast(`Refreshed ${count} saved analysis(es).`, "success");
+  }
+}
+
+async function removeSaved(id) {
+  if (!window.confirm(`Delete saved analysis '${id}'? The JSON document is removed; report artifacts are kept.`)) return;
+  const removed = await task(async () => {
+    const result = await api(`/api/v1/saved-analyses/${encodeURIComponent(id)}`, { method: "DELETE" });
+    await refreshSaved({ quiet: true });
+    return result;
+  }, "savedStatus", "Saved analysis removed.");
+  if (removed) toast(`Removed ${id}.`, "success");
+}
+
+async function downloadSavedReport(id) {
+  try {
+    const response = await fetch(`/api/v1/saved-analyses/${encodeURIComponent(id)}/report`);
+    const text = await response.text();
+    if (!response.ok) {
+      let message = text || response.statusText;
+      try { const payload = JSON.parse(text); message = payload.detail || message; } catch (_) { /* plain text */ }
+      throw new Error(message);
+    }
+    const blob = new Blob([text], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${id}.html`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast("Report downloaded.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function pollSaved() {
+  if (!state.project || document.hidden || !state.autoRefresh) return;
+  try {
+    const payload = await api("/api/v1/saved-analyses/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ due: true })
+    });
+    const refreshed = (payload.analyses || []).length;
+    await refreshSaved({ quiet: true });
+    if (refreshed) toast(`${refreshed} saved analysis(es) refreshed on schedule.`, "success");
+  } catch (_) {
+    // Polling is best-effort; explicit Refresh and the CLI remain available.
+  }
+}
+
+function startSavedPolling() {
+  setInterval(pollSaved, 60000);
 }
 
 /* -- export -------------------------------------------------------------- */
 function renderExportContext() {
   const node = document.getElementById("exportContext");
+  if (!node) return;
   if (!state.project) {
     node.textContent = "Open a project and run a pipeline first.";
     return;
@@ -1280,7 +2066,17 @@ function bindEvents() {
   });
   document.getElementById("projectChip").addEventListener("click", () => navigate("overview"));
   document.getElementById("datasetChip").addEventListener("click", () => navigate("data"));
-  document.getElementById("refreshButton").addEventListener("click", () => task(refreshProject, null, ""));
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    applyTheme(currentTheme() === "dark" ? "light" : "dark");
+  });
+  document.getElementById("helpButton").addEventListener("click", () => showDialog("helpDialog"));
+  document.getElementById("helpClose").addEventListener("click", () => closeDialog("helpDialog"));
+  document.getElementById("helpDone").addEventListener("click", () => closeDialog("helpDialog"));
+  document.getElementById("refreshButton").addEventListener("click", () => task(async () => {
+    await refreshProject();
+    await refreshSaved({ quiet: true });
+    toast("Workspace refreshed.");
+  }, null, ""));
   document.getElementById("closeProject").addEventListener("click", () => task(async () => {
     await api("/api/v1/project/close", { method: "POST" });
     await refreshProject();
@@ -1336,6 +2132,7 @@ function bindEvents() {
       document.getElementById("datasetFile").value = "";
       document.getElementById("datasetId").value = "";
       await refreshDatasets();
+      await refreshSaved({ quiet: true });
       renderProject();
       toast(`Imported ${files.length} file(s).`, "success");
     }, "datasetStatus", "Import complete.");
@@ -1349,6 +2146,7 @@ function bindEvents() {
       state.selectedDataset = null;
       await refreshDatasets();
       await refreshPipeline();
+      await refreshSaved({ quiet: true });
       renderProject();
       toast("Dataset removed.");
     }, "datasetStatus", "Dataset removed.");
@@ -1409,6 +2207,23 @@ function bindEvents() {
   }, "runStatus", "Pipeline ran successfully."));
 
   document.getElementById("runAnalysis").addEventListener("click", runAnalysis);
+  document.getElementById("analysisSearch").addEventListener("input", (event) => {
+    state.analysisQuery = event.target.value;
+    renderAnalysisList();
+  });
+
+  document.getElementById("saveForm").addEventListener("submit", submitSaveAnalysis);
+  document.getElementById("saveClose").addEventListener("click", () => closeDialog("saveDialog"));
+  document.getElementById("saveCancel").addEventListener("click", () => closeDialog("saveDialog"));
+
+  document.getElementById("refreshDueSaved").addEventListener("click", () => refreshSavedSet(true));
+  document.getElementById("refreshAllSaved").addEventListener("click", () => refreshSavedSet(false));
+  document.getElementById("autoRefreshSaved").addEventListener("change", (event) => {
+    state.autoRefresh = event.target.checked;
+    localStorage.setItem("dataStudio.autoRefresh", String(state.autoRefresh));
+    renderSaved();
+    if (state.autoRefresh) pollSaved();
+  });
 
   document.getElementById("exportResult").addEventListener("click", exportResult);
   document.getElementById("exportCsv").addEventListener("click", () => { setQuickExport("csv"); exportResult(); });
@@ -1419,6 +2234,27 @@ function bindEvents() {
     const input = document.getElementById("exportPath");
     const base = input.value.trim().replace(/\.[^./\\]+$/, "") || "exports/clean";
     input.value = `${base}.${format}`;
+  });
+
+  document.querySelectorAll("dialog.dialog").forEach((dialog) => {
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) closeDialog(dialog.id);
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideTip();
+    const tag = (event.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || event.target.isContentEditable) return;
+    if (event.key === "?") {
+      event.preventDefault();
+      showDialog("helpDialog");
+    } else if (event.key === "/" && state.view === "analyze") {
+      event.preventDefault();
+      const search = document.getElementById("analysisSearch");
+      search.focus();
+      if (search.select) search.select();
+    }
   });
 }
 
@@ -1454,21 +2290,30 @@ function buildTable(columns, rows) {
 
 /* -- boot ---------------------------------------------------------------- */
 (async function boot() {
+  const storedTheme = localStorage.getItem("dataStudio.theme");
+  applyTheme(storedTheme || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"), false);
+  bindTooltips();
   bindEvents();
   const saved = localStorage.getItem("dataStudio.path");
   if (saved) document.getElementById("projectPath").value = saved;
   navigate("overview");
   try {
-    const [operations, analyses] = await Promise.all([
+    const [operations, analyses, meta] = await Promise.all([
       api("/api/v1/operations"),
-      api("/api/v1/analyses")
+      api("/api/v1/analyses"),
+      api("/api/v1/meta").catch(() => null)
     ]);
     state.operations = operations;
     state.analyses = analyses;
+    state.meta = meta;
+    if (meta) {
+      document.getElementById("appVersion").textContent = `v${meta.version} · Phase ${meta.phase}`;
+    }
     renderOperationOptions();
     renderAnalysisList();
     renderKpi();
     await refreshProject();
+    startSavedPolling();
   } catch (error) {
     setStatus("projectStatus", error.message, true);
     toast(error.message, "error");

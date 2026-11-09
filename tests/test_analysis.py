@@ -235,9 +235,11 @@ def test_registry_catalog_and_validation() -> None:
     assert by_name["quality_profile"]["category"] == "quality"
     assert by_name["t_test"]["category"] == "inference"
     assert by_name["linear_regression"]["category"] == "regression"
+    assert by_name["time_series_summary"]["category"] == "time_series"
+    assert by_name["arima_forecast"]["category"] == "forecasting"
     assert {"name", "title", "category", "description", "params"} <= set(catalog[0])
 
-    assert len(DEFAULT_ANALYSIS_REGISTRY) == 12
+    assert len(DEFAULT_ANALYSIS_REGISTRY) == 17
     assert "value_counts" in DEFAULT_ANALYSIS_REGISTRY
     with pytest.raises(AnalysisError, match="Unknown analysis"):
         DEFAULT_ANALYSIS_REGISTRY.get("missing")

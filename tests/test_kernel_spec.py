@@ -34,12 +34,33 @@ def test_chart_spec_roundtrip() -> None:
         chart_type=ChartType.LINE,
         title="Revenue over time",
         encoding=Encoding(x="month", y="revenue"),
+        data=(
+            {"month": "2024-01", "revenue": 12.5},
+            {"month": "2024-02", "revenue": 15.0},
+        ),
         options={"smooth": True},
         transforms=({"filter": "amount > 0"},),
     )
     restored = ChartSpec.from_dict(chart.to_dict())
     assert restored == chart
     assert restored.chart_type is ChartType.LINE
+    assert restored.to_dict()["data"] == chart.to_dict()["data"]
+
+
+def test_chart_spec_coerces_and_validates_data() -> None:
+    chart = ChartSpec(
+        chart_type=ChartType.BAR,
+        title="Coerced",
+        data=({"region": "North", "amount": 10},),
+    )
+    assert chart.data == ({"region": "North", "amount": 10},)
+
+    with pytest.raises(TypeError):
+        ChartSpec(chart_type=ChartType.BAR, title="x", data=(object(),))
+    with pytest.raises(TypeError):
+        ChartSpec(chart_type=ChartType.BAR, title="x", data=({"a": object()},))
+    with pytest.raises(ValueError):
+        ChartSpec(chart_type=ChartType.BAR, title="x", data=({"": 1},))
 
 
 def test_chart_spec_validation() -> None:

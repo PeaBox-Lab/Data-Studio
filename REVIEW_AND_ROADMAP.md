@@ -397,21 +397,44 @@ Phase 2 is delivered in four slices so the kernel, UI and correctness work stay 
   `tests/test_inference.py` to 1e-6.
 - Done: every inference result is typed, testable and reference-matched within tolerance.
 
-**Phase 2C — Time series, charts and reports (3–4 weeks).**
+**Phase 2C — Time series, charts and reports (delivered).**
 
-- Time-series basics: decomposition, ACF/PACF, ARIMA/SARIMAX, backtest metrics.
-- Chart spec renderer for 10 chart types, driven by `AnalysisResult.charts`.
-- HTML report export (PDF next) that embeds the same typed results and chart specs.
-- Done when: an analysis can be run, charted and exported as a shareable report without code.
+- Time-series analyses: `time_series_summary` (frequency, coverage, gaps, trend),
+  `acf_pacf` (ACF/PACF and Ljung-Box), `seasonal_decompose` (additive/multiplicative with
+  strength metrics), `trend_test` (Mann-Kendall and Sen's slope) and `arima_forecast`
+  (conditional sum of squares, widening intervals and hold-out backtest).
+- A deterministic SVG chart renderer covering all eleven `ChartType` marks, with light and
+  dark themes, legends, nice ticks and tooltips. Chart specifications now embed the data
+  they need, so a chart is self-contained and renders identically in the API, the
+  workspace and a report.
+- Self-contained HTML report export: inline SVG, tables, metrics, diagnostics, narrative
+  and provenance, with no scripts, external assets or network access.
+- `POST /api/v1/charts/render` and `POST /api/v1/analyses/report`, plus a `data-studio
+  report` CLI command that writes into the project's `reports/` directory.
+- The workspace renders result charts and offers a one-click "Export HTML report" action.
+- Reference fixtures generated independently with SciPy, `statsmodels` and `pymannkendall`
+  and pinned in `tests/test_timeseries.py`.
+- Done: an analysis can be run, charted and exported as a shareable report without code.
 
-**Phase 2D — Persistence and scheduling (2–3 weeks).**
+**Phase 2D - Persistence and scheduling (delivered).**
 
-- Persist `AnalysisResult` documents under `analyses/` with input fingerprints and cache keys.
-- Refresh policy: re-run analyses when datasets or pipeline fingerprints change.
-- Scheduled project refresh that writes results and report artifacts.
-- Done when: a saved analysis survives restart, invalidates correctly and refreshes on a schedule.
+- `SavedAnalysis` documents persist under `analyses/<id>.json`: analysis name, typed
+  parameters, dataset, `use_pipeline`, schedule, timestamps, report path and the last typed
+  `AnalysisResult`. Writes are atomic and plain JSON; no pickle or executable content.
+- Input fingerprint = dataset checksum + serialised pipeline + app version + `use_pipeline`.
+  A changed dataset or pipeline step marks the saved result stale until it is refreshed.
+- Schedules: `manual`, `on_open`, `hourly` and `daily`, evaluated on project open, by the
+  workspace timer while visible, or by `data-studio refresh --due`. No background daemon.
+- Optional self-contained report artifacts under `reports/<id>.html`, rewritten on save and
+  refresh, plus `GET /api/v1/saved-analyses/{id}/report` to download them.
+- API and CLI: save/list/get/refresh/remove, `--schedule`, `--report`, `--overwrite`,
+  `--due` and `--json`. The workspace adds a Saved view with freshness badges, refresh
+  actions, report downloads and auto-refresh polling.
+- Workspace redesign: light/dark theme, grouped and collapsible analysis catalog with search,
+  contextual tooltips and a quick-help dialog, and saved-analysis actions on results.
+- Done: a saved analysis survives restart, invalidates correctly and refreshes on a schedule.
 
-**Phase 2 exit criteria:** at least 12 analyses produce typed, testable, exportable results
+**Phase 2 exit criteria:** at least 17 analyses produce typed, testable, exportable results
 identical (within tolerance) to reference implementations, and the workspace, CLI and API
 render the same numbers.
 
