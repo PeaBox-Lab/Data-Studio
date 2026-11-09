@@ -421,6 +421,56 @@ staleness and waste time.
 
 ---
 
+## ADR-016: Dashboards query a semantic model through a safe measure DSL
+
+**Status:** Accepted
+
+**Context.** Phase 3A needs live dashboards, not a second copy of the analysis layer. A
+dashboard must aggregate stored data by dimensions, apply shared slicers, and stay readable
+and auditable. Letting project JSON carry raw SQL would make every project a code-execution
+surface. Storing pre-computed tile values would make dashboards stale and hide their logic.
+
+**Decision.**
+
+- A project owns one semantic model at `models/semantic.json`: tables map dataset ids to
+  names; relationships describe joins; dimensions name grouping columns; measures are typed
+  aggregate expressions.
+- Measures use a small DSL (`sum(amount)`, `sum(amount) / count()`,
+  `sum(units) where region = 'North'`). The parser accepts a fixed aggregate set, arithmetic,
+  parentheses and `where` predicates. It compiles to quoted DuckDB SQL with parameter values
+  escaped as literals. Raw SQL is never read from a project file.
+- Unqualified column references must resolve to exactly one table. Ambiguous names are
+  rejected with a `SemanticError` and must be qualified as `table.column`; silently picking a
+  table would make results depend on join order.
+- `SemanticEngine` plans the `LEFT JOIN`s required by the referenced dimensions and measures
+  along model relationships and executes one grouped SQL statement. Filters on dimensions are
+  `WHERE`; filters on measures are `HAVING`. Only pipeline output for the model's
+  `default_table` is used; other tables read their raw stored snapshots.
+- Dashboards are versioned JSON under `dashboards/<id>.json` with KPI, chart and table tiles
+  plus shared slicers. A tile is a semantic query and a presentation choice. Slicer
+  selections become `in` filters on every tile; a tile that cannot join a slicer dimension
+  returns its own error, so one incompatible tile cannot blank the dashboard.
+- Tile rendering goes through the existing kernel chart renderer. The API, the workspace and
+  the standalone HTML report consume the same `DashboardView`; no numbers or SVGs are stored
+  in the dashboard document.
+- The starter model is derived from recorded schemas only. Derivation never guesses
+  relationships; a derived model is a safe starting point that a user edits.
+
+**Consequences.**
+
+- Dashboards are small, reviewable documents and inherit dataset checksums, schema
+  validation and atomic writes from the project format.
+- The same safety argument as pipelines holds: a dashboard can choose among vetted
+  aggregates, dimensions and filters, but cannot execute arbitrary SQL or Python.
+- Users pay for relationship mistakes at model or tile level with a clear message instead of
+  a silently wrong join.
+- A future report scheduler, dashboard grid layout or non-SQL semantic engine can build on
+  the same model and query contracts without changing stored dashboards.
+- Cross-table measures require a relationship; the engine does not invent one from matching
+  column names.
+
+---
+
 ## Open decisions
 
 These are deliberately deferred; record the answer here when it is made.

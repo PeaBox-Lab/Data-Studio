@@ -12,6 +12,7 @@ workspace asks the user to create or open one.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import suppress
 from datetime import UTC, datetime
@@ -27,6 +28,15 @@ from ..analysis.saved import (
     SCHEDULES,
     SavedAnalysisStore,
 )
+from ..dashboard import (
+    Dashboard,
+    DashboardRenderer,
+    DashboardSlicer,
+    DashboardStore,
+    DashboardTile,
+    render_dashboard_html,
+    write_dashboard_report,
+)
 from ..engine.duckdb_engine import EngineError
 from ..kernel.chart_render import DEFAULT_HEIGHT, DEFAULT_WIDTH, render_chart
 from ..kernel.spec import ChartSpec
@@ -35,6 +45,12 @@ from ..pipeline.runner import PipelineRunner
 from ..project.manifest import safe_project_path
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
+from ..semantic import (
+    SemanticEngine,
+    SemanticModel,
+    SemanticModelStore,
+    SemanticQuery,
+)
 from ..steps import DEFAULT_REGISTRY
 from ..steps.registry import StepError, UnknownStepError
 from ..version import API_VERSION, PROJECT_FORMAT_VERSION, __version__
@@ -154,6 +170,17 @@ def create_app(
     def saved_store() -> SavedAnalysisStore:
         return SavedAnalysisStore(project())
 
+    def model_store() -> SemanticModelStore:
+        return SemanticModelStore(project())
+
+    def semantic_engine(use_pipeline: bool = True) -> SemanticEngine:
+        return SemanticEngine(
+            project(), model_store().get(), use_pipeline=use_pipeline
+        )
+
+    def dashboard_store() -> DashboardStore:
+        return DashboardStore(project())
+
     def refresh_on_open(active: Project) -> None:
         # A scheduled refresh must never stop a project from opening.
         with suppress(OSError, ValueError, TypeError, KeyError, RuntimeError):
@@ -211,14 +238,15 @@ def create_app(
             "version": __version__,
             "api_version": API_VERSION,
             "project_format_version": PROJECT_FORMAT_VERSION,
-            "phase": 2,
+            "phase": 3,
             "capabilities": {
                 "projects": True,
                 "datasets": True,
                 "pipelines": True,
                 "exports": True,
                 "analyses": True,
-                "dashboards": False,
+                "semantic_model": True,
+                "dashboards": True,
             },
             "operations": len(DEFAULT_REGISTRY),
             "analysis_operations": len(DEFAULT_ANALYSIS_REGISTRY),
@@ -598,6 +626,210 @@ def create_app(
             "bytes": written.stat().st_size,
             "results": [item.result_id for item in results],
             "html": written.read_text(encoding="utf-8"),
+        }
+
+    # -- semantic model ----------------------------------------------------
+
+    @app.get("/api/v1/model", tags=["semantic"])
+    def get_semantic_model() -> dict[str, Any]:
+        return model_store().to_dict()
+
+    @app.put("/api/v1/model", tags=["semantic"])
+    def put_semantic_model(payload: dict[str, Any]) -> dict[str, Any]:
+        raw = payload.get("model", payload)
+        if not isinstance(raw, dict):
+            raise ValueError("A semantic model object is required.")
+        model = SemanticModel.from_dict(raw)
+        store = model_store()
+        saved = store.save(model)
+        return store.to_dict(saved)
+
+    @app.post("/api/v1/model/derive", status_code=201, tags=["semantic"])
+    def derive_semantic_model(payload: dict[str, Any]) -> dict[str, Any]:
+        name = payload.get("name") or "Semantic model"
+        if not isinstance(name, str):
+            raise ValueError("Model 'name' must be a string.")
+        base_table = payload.get("base_table")
+        if base_table is not None and not isinstance(base_table, str):
+            raise ValueError("Model 'base_table' must be a dataset id or null.")
+        datasets = payload.get("datasets")
+        if datasets is not None and (
+            not isinstance(datasets, list)
+            or not all(isinstance(item, str) for item in datasets)
+        ):
+            raise ValueError("Model 'datasets' must be a list of dataset ids.")
+        store = model_store()
+        model = store.derive(
+            name=name,
+            base_table=base_table,
+            dataset_ids=datasets,
+        )
+        return store.to_dict(model)
+
+    @app.delete("/api/v1/model", tags=["semantic"])
+    def delete_semantic_model() -> dict[str, str]:
+        model_store().remove()
+        return {"removed": "semantic"}
+
+    @app.post("/api/v1/model/query", tags=["semantic"])
+    def semantic_query(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A semantic query object is required.")
+        query = SemanticQuery.from_dict(payload)
+        engine = semantic_engine(bool(payload.get("use_pipeline", True)))
+        return engine.query(query).to_dict()
+
+    @app.get(
+        "/api/v1/model/dimensions/{dimension}/values",
+        tags=["semantic"],
+    )
+    def semantic_dimension_values(
+        dimension: str,
+        limit: int = Query(100, ge=1, le=1000),
+        search: str | None = Query(None),
+    ) -> dict[str, Any]:
+        return semantic_engine().dimension_values(
+            dimension, limit=limit, search=search
+        )
+
+    # -- dashboards --------------------------------------------------------
+
+    @app.get("/api/v1/dashboards", tags=["dashboards"])
+    def list_dashboards() -> dict[str, Any]:
+        return dashboard_store().to_dict()
+
+    @app.post("/api/v1/dashboards", status_code=201, tags=["dashboards"])
+    def create_dashboard(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A dashboard object is required.")
+        store = dashboard_store()
+        model = model_store().load()
+        overwrite = bool(payload.get("overwrite", False))
+        if payload.get("id"):
+            saved = store.save(
+                Dashboard.from_dict(payload), model=model, overwrite=overwrite
+            )
+        else:
+            tiles = tuple(
+                DashboardTile.from_dict(item) for item in payload.get("tiles", ())
+            )
+            slicers = tuple(
+                DashboardSlicer.from_dict(item)
+                for item in payload.get("slicers", ())
+            )
+            saved = store.create(
+                title=str(payload.get("title", "")),
+                description=str(payload.get("description", "")),
+                tiles=tiles,
+                slicers=slicers,
+                model=model,
+                overwrite=overwrite,
+            )
+        return saved.to_dict()
+
+    @app.get("/api/v1/dashboards/{dashboard_id}", tags=["dashboards"])
+    def get_dashboard(dashboard_id: str) -> dict[str, Any]:
+        return dashboard_store().get(dashboard_id).to_dict()
+
+    @app.put("/api/v1/dashboards/{dashboard_id}", tags=["dashboards"])
+    def update_dashboard(
+        dashboard_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A dashboard object is required.")
+        raw = dict(payload)
+        raw["id"] = dashboard_id
+        dashboard = Dashboard.from_dict(raw)
+        return dashboard_store().save(
+            dashboard, model=model_store().load(), overwrite=True
+        ).to_dict()
+
+    @app.delete("/api/v1/dashboards/{dashboard_id}", tags=["dashboards"])
+    def delete_dashboard(dashboard_id: str) -> dict[str, str]:
+        dashboard_store().remove(dashboard_id)
+        return {"removed": dashboard_id}
+
+    def render_dashboard(
+        dashboard_id: str,
+        payload: dict[str, Any] | None,
+        *,
+        theme: str = "light",
+        selections: dict[str, Any] | None = None,
+    ) -> Any:
+        body = payload or {}
+        dashboard = dashboard_store().get(dashboard_id)
+        engine = semantic_engine(bool(body.get("use_pipeline", True)))
+        return DashboardRenderer(engine).render(
+            dashboard,
+            selections=selections or body.get("selections") or {},
+            theme=theme,
+        )
+
+    @app.post("/api/v1/dashboards/{dashboard_id}/render", tags=["dashboards"])
+    def render_dashboard_view(
+        dashboard_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        body = payload or {}
+        theme = body.get("theme") or "light"
+        if theme not in ("light", "dark"):
+            raise ValueError("Dashboard theme must be 'light' or 'dark'.")
+        return render_dashboard(dashboard_id, body, theme=theme).to_dict()
+
+    @app.get(
+        "/api/v1/dashboards/{dashboard_id}/report",
+        response_class=HTMLResponse,
+        tags=["dashboards"],
+    )
+    def dashboard_report(
+        dashboard_id: str,
+        theme: str = Query("light"),
+        selections: str | None = Query(None),
+    ) -> HTMLResponse:
+        if theme not in ("light", "dark"):
+            raise ValueError("Dashboard theme must be 'light' or 'dark'.")
+        chosen: dict[str, Any] = {}
+        if selections:
+            try:
+                parsed = json.loads(selections)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"'selections' is not valid JSON: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("'selections' must be a JSON object.")
+            chosen = parsed
+        view = render_dashboard(
+            dashboard_id, {}, theme=theme, selections=chosen
+        )
+        return HTMLResponse(
+            render_dashboard_html(view, theme=theme)
+        )
+
+    @app.post("/api/v1/dashboards/{dashboard_id}/report", tags=["dashboards"])
+    def write_dashboard_report_file(
+        dashboard_id: str, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        body = payload or {}
+        theme = body.get("theme") or "light"
+        if theme not in ("light", "dark"):
+            raise ValueError("Dashboard theme must be 'light' or 'dark'.")
+        destination = body.get("destination")
+        if destination is None:
+            destination = f"reports/dashboard-{dashboard_id}.html"
+        if not isinstance(destination, str) or not destination.strip():
+            raise ValueError("Report 'destination' must be a non-empty string.")
+        relative = destination.strip().replace("\\", "/")
+        view = render_dashboard(dashboard_id, body, theme=theme)
+        path = safe_project_path(project().root, relative)
+        written = write_dashboard_report(
+            view,
+            path,
+            title=body.get("title"),
+            theme=theme,
+        )
+        return {
+            "destination": str(written),
+            "relative_path": relative,
+            "bytes": written.stat().st_size,
+            "tiles": len(view.tiles),
         }
 
     return app

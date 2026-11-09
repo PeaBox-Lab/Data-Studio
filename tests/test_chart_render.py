@@ -60,6 +60,8 @@ def test_every_chart_type_renders_standalone_svg(chart_type: ChartType) -> None:
     assert "<script" not in svg
     assert "http://" not in svg or "http://www.w3.org/2000/svg" in svg
     assert 'role="img"' in svg
+    assert 'height="auto"' not in svg
+    assert 'style="height:auto;display:block"' in svg
 
 
 def test_render_is_deterministic() -> None:

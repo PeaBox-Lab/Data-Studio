@@ -230,7 +230,8 @@ def _frame(
 ) -> None:
     parts.append(
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
-        f'width="100%" height="auto" role="img" aria-label="{_escape(chart.title)}">'
+        f'width="100%" style="height:auto;display:block" '
+        f'role="img" aria-label="{_escape(chart.title)}">'
     )
     parts.append(f"<title>{_escape(chart.title)}</title>")
     parts.append(

@@ -14,6 +14,13 @@ from typing import Any
 
 from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext
 from ..analysis.saved import SCHEDULES, SavedAnalysisStore
+from ..dashboard import (
+    DashboardRenderer,
+    DashboardSlicer,
+    DashboardStore,
+    DashboardTile,
+    write_dashboard_report,
+)
 from ..engine.duckdb_engine import EngineError
 from ..io.sniff import CsvOptions
 from ..kernel.table import TableData
@@ -27,6 +34,14 @@ from ..project.manifest import (
 )
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
+from ..semantic import (
+    QueryFilter,
+    QueryOrder,
+    SemanticEngine,
+    SemanticModel,
+    SemanticModelStore,
+    SemanticQuery,
+)
 from ..version import __version__
 
 _CORE_PACKAGES = {
@@ -106,6 +121,30 @@ def _read_params(value: str | None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("--params must be a JSON object.")
     return payload
+
+
+def _read_json(value: str | None) -> Any:
+    if value is None:
+        return None
+    text = value
+    if value == "-":
+        text = sys.stdin.read()
+    elif value.startswith("@"):
+        text = Path(value[1:]).read_text(encoding="utf-8")
+    return json.loads(text or "null")
+
+
+def _coerce(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return value
+
+
+def _csv_list(value: str | None) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _open(args: argparse.Namespace) -> Project:
@@ -640,6 +679,359 @@ def _cmd_remove_saved(args: argparse.Namespace) -> int:
         return _fail(exc)
 
 
+def _cmd_model_show(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            payload = SemanticModelStore(project).to_dict()
+            if args.json:
+                _print_json(payload)
+                return 0
+            if not payload["exists"]:
+                print("No semantic model. Run: data-studio model-derive PROJECT")
+                return 0
+            model = payload["model"]
+            print(f"{model['name']}  (default table: {model['default_table']})")
+            print("")
+            print("TABLES")
+            for table in model["tables"]:
+                print(f"  {table['name']:<24} {table['dataset']}")
+            if model["relationships"]:
+                print("")
+                print("RELATIONSHIPS")
+                for item in model["relationships"]:
+                    print(
+                        f"  {item['from_table']}.{item['from_column']} -> "
+                        f"{item['to_table']}.{item['to_column']}  ({item['kind']})"
+                    )
+            print("")
+            print(f"DIMENSIONS ({len(model['dimensions'])})")
+            for item in model["dimensions"]:
+                print(f"  {item['name']:<24} {item['table']}.{item['column']}")
+            print("")
+            print(f"MEASURES ({len(model['measures'])})")
+            for item in model["measures"]:
+                print(
+                    f"  {item['name']:<24} {item['format']:<9} {item['expression']}"
+                )
+            if payload["problems"]:
+                print("")
+                print("PROBLEMS")
+                for problem in payload["problems"]:
+                    print(f"  - {problem}")
+            else:
+                print("")
+                print("Model matches the project schemas.")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_model_derive(args: argparse.Namespace) -> int:
+    try:
+        datasets = _csv_list(args.datasets)
+        with _open(args) as project:
+            store = SemanticModelStore(project)
+            model = store.derive(
+                name=args.name,
+                base_table=args.base,
+                dataset_ids=datasets or None,
+            )
+            if args.json:
+                _print_json(store.to_dict(model))
+                return 0
+            print(
+                f"Derived {model.name!r}: {len(model.tables)} table(s), "
+                f"{len(model.dimensions)} dimension(s), "
+                f"{len(model.measures)} measure(s)."
+            )
+            print(f"Saved to {store.path}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_model_set(args: argparse.Namespace) -> int:
+    try:
+        payload = _read_json(args.model)
+        if not isinstance(payload, dict):
+            raise ValueError("--model must be a JSON object, @file or -.")
+        with _open(args) as project:
+            store = SemanticModelStore(project)
+            model = SemanticModel.from_dict(payload.get("model", payload))
+            saved = store.save(model)
+            if args.json:
+                _print_json(store.to_dict(saved))
+                return 0
+            print(f"Saved semantic model {saved.name!r} to {store.path}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_model_remove(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            SemanticModelStore(project).remove()
+            if args.json:
+                _print_json({"removed": "semantic"})
+            else:
+                print("Removed the semantic model.")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _parse_order(value: str) -> QueryOrder:
+    parts = value.replace(":", " ").split()
+    if not parts:
+        raise ValueError("--order needs a field name.")
+    return QueryOrder(parts[0], parts[1] if len(parts) > 1 else "asc")
+
+
+def _cmd_query(args: argparse.Namespace) -> int:
+    try:
+        filters: list[QueryFilter] = []
+        for field, operator, raw in args.filter or []:
+            if operator in {"in", "not_in", "between"}:
+                value: Any = [_coerce(part) for part in raw.split(",")]
+            else:
+                value = _coerce(raw)
+            filters.append(QueryFilter(field, operator, value))
+        orders = tuple(_parse_order(item) for item in (args.order or []))
+        query = SemanticQuery(
+            dimensions=_csv_list(args.dimensions),
+            measures=_csv_list(args.measures),
+            filters=tuple(filters),
+            order_by=orders,
+            limit=args.limit,
+            table=args.table,
+        )
+        with _open(args) as project:
+            model = SemanticModelStore(project).get()
+            engine = SemanticEngine(
+                project, model, use_pipeline=not args.raw
+            )
+            result = engine.query(query)
+            if args.json:
+                _print_json(result.to_dict())
+                return 0
+            if not result.rows:
+                print("No rows.")
+                return 0
+            _print_table(
+                [column.title for column in result.columns],
+                [
+                    [row.get(column.name) for column in result.columns]
+                    for row in result.rows
+                ],
+            )
+            print("")
+            print(
+                f"{result.row_count} row(s) in {result.elapsed_ms:.1f} ms"
+                + (" (limited)" if result.truncated else "")
+            )
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_dashboard_list(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            payload = DashboardStore(project).to_dict()
+            if args.json:
+                _print_json(payload)
+                return 0
+            dashboards = payload["dashboards"]
+            if not dashboards:
+                print("No dashboards.")
+            else:
+                print(f"{'ID':<28} {'TILES':>5} {'SLICERS':>7}  TITLE")
+                print("-" * 84)
+                for item in dashboards:
+                    print(
+                        f"{item['id']:<28} {len(item['tiles']):>5} "
+                        f"{len(item['slicers']):>7}  {item['title']}"
+                    )
+            for error in payload["errors"]:
+                print(f"WARNING: {error}", file=sys.stderr)
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_dashboard_show(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            if not args.dashboard_id:
+                return _cmd_dashboard_list(args)
+            dashboard = DashboardStore(project).get(args.dashboard_id)
+            if args.json:
+                _print_json(dashboard.to_dict())
+                return 0
+            print(f"{dashboard.title} ({dashboard.id})")
+            if dashboard.description:
+                print(f"  {dashboard.description}")
+            print(f"  updated {dashboard.updated_at or 'never'}")
+            if dashboard.slicers:
+                print("  slicers")
+                for slicer in dashboard.slicers:
+                    print(
+                        f"    {slicer.id:<20} {slicer.dimension:<24} "
+                        f"{'multi' if slicer.multi else 'single'}"
+                    )
+            if dashboard.tiles:
+                print("  tiles")
+                for tile in dashboard.tiles:
+                    detail = ", ".join(tile.dimensions + tile.measures)
+                    print(
+                        f"    {tile.id:<20} {tile.kind:<7} "
+                        f"width {tile.width}  {detail}"
+                    )
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_dashboard_save(args: argparse.Namespace) -> int:
+    try:
+        tiles_raw = _read_json(args.tiles) or []
+        slicers_raw = _read_json(args.slicers) or []
+        if not isinstance(tiles_raw, list):
+            raise ValueError("--tiles must be a JSON list.")
+        if not isinstance(slicers_raw, list):
+            raise ValueError("--slicers must be a JSON list.")
+        tiles = tuple(DashboardTile.from_dict(item) for item in tiles_raw)
+        slicers = tuple(
+            DashboardSlicer.from_dict(item) for item in slicers_raw
+        )
+        with _open(args) as project:
+            model = SemanticModelStore(project).load()
+            dashboard = DashboardStore(project).create(
+                title=args.title,
+                description=args.description or "",
+                tiles=tiles,
+                slicers=slicers,
+                dashboard_id=args.dashboard_id,
+                model=model,
+                overwrite=args.overwrite,
+            )
+            if args.json:
+                _print_json(dashboard.to_dict())
+                return 0
+            print(f"Saved dashboard {dashboard.title!r} as {dashboard.id}")
+            print(f"  tiles    {len(dashboard.tiles)}")
+            print(f"  slicers  {len(dashboard.slicers)}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_dashboard_remove(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            DashboardStore(project).remove(args.dashboard_id)
+            if args.json:
+                _print_json({"removed": args.dashboard_id})
+            else:
+                print(f"Removed dashboard {args.dashboard_id!r}.")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _parse_selection(value: str) -> tuple[str, list[Any]]:
+    key, _, raw = value.partition("=")
+    key = key.strip()
+    if not key:
+        raise ValueError("--select needs SLICER=VALUE.")
+    if not raw.strip():
+        return key, []
+    return key, [_coerce(item.strip()) for item in raw.split(",")]
+
+
+def _cmd_dashboard_render(args: argparse.Namespace) -> int:
+    try:
+        selections = dict(_parse_selection(item) for item in (args.select or []))
+        with _open(args) as project:
+            model = SemanticModelStore(project).get()
+            dashboard = DashboardStore(project).get(args.dashboard_id)
+            view = DashboardRenderer(
+                SemanticEngine(project, model, use_pipeline=not args.raw)
+            ).render(dashboard, selections=selections, theme=args.theme)
+            if args.json:
+                _print_json(view.to_dict())
+                return 0
+            print(f"{dashboard.title} ({dashboard.id})")
+            print(f"  generated {view.generated_at}")
+            for tile in view.tiles:
+                print("")
+                print(f"{tile.tile.title} [{tile.tile.kind}]")
+                if tile.error:
+                    print(f"  ERROR {tile.error}")
+                    continue
+                result = tile.result
+                if result is None:
+                    print("  no result")
+                    continue
+                if tile.tile.kind == "kpi":
+                    row = result.rows[0] if result.rows else {}
+                    for column in result.columns:
+                        print(f"  {column.title:<24} {_cell(row.get(column.name))}")
+                elif tile.tile.kind == "table":
+                    _print_table(
+                        [column.title for column in result.columns],
+                        [
+                            [row.get(column.name) for column in result.columns]
+                            for row in result.rows
+                        ],
+                    )
+                else:
+                    print(
+                        f"  {result.row_count} row(s), chart {tile.tile.chart}"
+                        + (", SVG rendered" if tile.svg else "")
+                    )
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_dashboard_report(args: argparse.Namespace) -> int:
+    try:
+        selections = dict(_parse_selection(item) for item in (args.select or []))
+        with _open(args) as project:
+            model = SemanticModelStore(project).get()
+            dashboard = DashboardStore(project).get(args.dashboard_id)
+            view = DashboardRenderer(
+                SemanticEngine(project, model, use_pipeline=not args.raw)
+            ).render(dashboard, selections=selections, theme=args.theme)
+            destination = args.destination or f"reports/dashboard-{dashboard.id}.html"
+            path = Path(destination)
+            if not path.is_absolute():
+                path = safe_project_path(
+                    project.root, destination.replace("\\", "/")
+                )
+            written = write_dashboard_report(
+                view,
+                path,
+                title=args.title,
+                theme=args.theme,
+            )
+            if args.json:
+                _print_json(
+                    {
+                        "destination": str(written),
+                        "bytes": written.stat().st_size,
+                        "tiles": len(view.tiles),
+                    }
+                )
+                return 0
+            print(f"Wrote dashboard report to {written}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -886,6 +1278,167 @@ def build_parser() -> argparse.ArgumentParser:
     remove_saved.add_argument("saved_id", help="Saved analysis id to remove.")
     remove_saved.add_argument("--json", action="store_true", help="Emit JSON.")
     remove_saved.set_defaults(handler=_cmd_remove_saved)
+
+    model_show = subparsers.add_parser(
+        "model-show", help="Show the semantic model, dimensions and measures."
+    )
+    model_show.add_argument("project", help="Project directory.")
+    model_show.add_argument("--json", action="store_true", help="Emit JSON.")
+    model_show.set_defaults(handler=_cmd_model_show)
+
+    model_derive = subparsers.add_parser(
+        "model-derive", help="Derive and save a starter semantic model from datasets."
+    )
+    model_derive.add_argument("project", help="Project directory.")
+    model_derive.add_argument("--name", default="Semantic model", help="Model name.")
+    model_derive.add_argument(
+        "--base", help="Dataset id to use as the default (fact) table."
+    )
+    model_derive.add_argument(
+        "--datasets", help="Comma-separated dataset ids (defaults to all)."
+    )
+    model_derive.add_argument("--json", action="store_true", help="Emit JSON.")
+    model_derive.set_defaults(handler=_cmd_model_derive)
+
+    model_set = subparsers.add_parser(
+        "model-set", help="Replace the semantic model from a JSON document."
+    )
+    model_set.add_argument("project", help="Project directory.")
+    model_set.add_argument(
+        "--model", required=True, help="Model JSON, @file or - for stdin."
+    )
+    model_set.add_argument("--json", action="store_true", help="Emit JSON.")
+    model_set.set_defaults(handler=_cmd_model_set)
+
+    model_remove = subparsers.add_parser(
+        "model-remove", help="Delete the project's semantic model."
+    )
+    model_remove.add_argument("project", help="Project directory.")
+    model_remove.add_argument("--json", action="store_true", help="Emit JSON.")
+    model_remove.set_defaults(handler=_cmd_model_remove)
+
+    query = subparsers.add_parser(
+        "query", help="Run a semantic query (dimensions, measures and filters)."
+    )
+    query.add_argument("project", help="Project directory.")
+    query.add_argument("--dimensions", help="Comma-separated dimension names.")
+    query.add_argument("--measures", help="Comma-separated measure names.")
+    query.add_argument(
+        "--filter",
+        nargs=3,
+        action="append",
+        metavar=("FIELD", "OP", "VALUE"),
+        help="Filter, for example: --filter region = North.",
+    )
+    query.add_argument(
+        "--order", action="append", help="Order by a field, for example: total desc."
+    )
+    query.add_argument("--limit", type=int, help="Maximum rows.")
+    query.add_argument("--table", help="Override the semantic base table.")
+    query.add_argument(
+        "--raw",
+        action="store_true",
+        help="Query raw datasets instead of the pipeline output for the base table.",
+    )
+    query.add_argument("--json", action="store_true", help="Emit JSON.")
+    query.set_defaults(handler=_cmd_query)
+
+    dashboard_list = subparsers.add_parser(
+        "dashboard-list", help="List dashboards in a project."
+    )
+    dashboard_list.add_argument("project", help="Project directory.")
+    dashboard_list.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_list.set_defaults(handler=_cmd_dashboard_list)
+
+    dashboard_save = subparsers.add_parser(
+        "dashboard-save", help="Create or replace a dashboard definition."
+    )
+    dashboard_save.add_argument("project", help="Project directory.")
+    dashboard_save.add_argument("--title", required=True, help="Dashboard title.")
+    dashboard_save.add_argument("--id", dest="dashboard_id", help="Dashboard id.")
+    dashboard_save.add_argument("--description", help="Dashboard description.")
+    dashboard_save.add_argument(
+        "--tiles", help="Tiles as a JSON list, @file or - for stdin."
+    )
+    dashboard_save.add_argument(
+        "--slicers", help="Slicers as a JSON list, @file or - for stdin."
+    )
+    dashboard_save.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing dashboard id."
+    )
+    dashboard_save.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_save.set_defaults(handler=_cmd_dashboard_save)
+
+    dashboard_show = subparsers.add_parser(
+        "dashboard-show", help="Show a dashboard definition."
+    )
+    dashboard_show.add_argument("project", help="Project directory.")
+    dashboard_show.add_argument("dashboard_id", nargs="?", help="Dashboard id.")
+    dashboard_show.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_show.set_defaults(handler=_cmd_dashboard_show)
+
+    dashboard_render = subparsers.add_parser(
+        "dashboard-render", help="Render a dashboard and print tile results."
+    )
+    dashboard_render.add_argument("project", help="Project directory.")
+    dashboard_render.add_argument("dashboard_id", help="Dashboard id.")
+    dashboard_render.add_argument(
+        "--select",
+        action="append",
+        metavar="SLICER=VALUE",
+        help="Slicer selection, for example: --select region=North.",
+    )
+    dashboard_render.add_argument(
+        "--theme",
+        choices=("light", "dark"),
+        default="light",
+        help="Chart theme.",
+    )
+    dashboard_render.add_argument(
+        "--raw",
+        action="store_true",
+        help="Query raw datasets instead of the pipeline output for the base table.",
+    )
+    dashboard_render.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_render.set_defaults(handler=_cmd_dashboard_render)
+
+    dashboard_remove = subparsers.add_parser(
+        "dashboard-remove", help="Delete a dashboard definition."
+    )
+    dashboard_remove.add_argument("project", help="Project directory.")
+    dashboard_remove.add_argument("dashboard_id", help="Dashboard id.")
+    dashboard_remove.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_remove.set_defaults(handler=_cmd_dashboard_remove)
+
+    dashboard_report = subparsers.add_parser(
+        "dashboard-report", help="Export a dashboard as a self-contained HTML report."
+    )
+    dashboard_report.add_argument("project", help="Project directory.")
+    dashboard_report.add_argument("dashboard_id", help="Dashboard id.")
+    dashboard_report.add_argument(
+        "--destination",
+        help="Output HTML path (defaults to reports/dashboard-<id>.html).",
+    )
+    dashboard_report.add_argument("--title", help="Report title.")
+    dashboard_report.add_argument(
+        "--select",
+        action="append",
+        metavar="SLICER=VALUE",
+        help="Slicer selection, for example: --select region=North.",
+    )
+    dashboard_report.add_argument(
+        "--theme",
+        choices=("light", "dark"),
+        default="light",
+        help="Report colour theme.",
+    )
+    dashboard_report.add_argument(
+        "--raw",
+        action="store_true",
+        help="Query raw datasets instead of the pipeline output for the base table.",
+    )
+    dashboard_report.add_argument("--json", action="store_true", help="Emit JSON.")
+    dashboard_report.set_defaults(handler=_cmd_dashboard_report)
 
     serve = subparsers.add_parser("serve", help="Run the local web application.")
     serve.add_argument("--host", default="127.0.0.1")

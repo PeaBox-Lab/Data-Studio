@@ -18,8 +18,8 @@ MyProject/
   steps/                # ordered pipeline definition: pipeline.json
     pipeline.json
   analyses/             # stored AnalysisResult documents (Phase 2)
-  dashboards/           # dashboard specifications (Phase 3)
-  models/               # model artifacts and metadata (Phase 5)
+  dashboards/           # dashboard specifications (Phase 3A)
+  models/               # semantic model: semantic.json (Phase 3A)
   reports/              # self-contained HTML reports (Phase 2C)
 ```
 
@@ -355,12 +355,141 @@ Generated HTML reports (`reports/*.html`) are plain, self-contained artifacts wi
 CSS and SVG: no scripts, external asset URLs or executable payloads. They carry no checksum
 in the manifest and can be deleted and regenerated at any time by a refresh.
 
+## Semantic model (`models/semantic.json`)
+
+A project owns at most one semantic model. It is a versioned JSON document that maps stored
+datasets to analytical tables, dimensions and measures. It contains no SQL, no code and no
+data rows, so it is safe to read without executing anything.
+
+```json
+{
+  "schema_version": "1",
+  "name": "Sales model",
+  "default_table": "sales",
+  "tables": [
+    {"name": "sales", "dataset": "sales", "title": null},
+    {"name": "regions", "dataset": "regions", "title": null}
+  ],
+  "relationships": [
+    {
+      "from_table": "sales",
+      "from_column": "region",
+      "to_table": "regions",
+      "to_column": "region",
+      "kind": "many_to_one"
+    }
+  ],
+  "dimensions": [
+    {"name": "region", "table": "sales", "column": "region", "title": null, "description": ""},
+    {"name": "manager", "table": "regions", "column": "manager", "title": null, "description": ""}
+  ],
+  "measures": [
+    {
+      "name": "total_amount",
+      "expression": "sum(amount)",
+      "title": "Total amount",
+      "format": "currency",
+      "description": ""
+    },
+    {
+      "name": "north_amount",
+      "expression": "sum(amount) where sales.region = 'North'",
+      "title": "North amount",
+      "format": "currency",
+      "description": ""
+    }
+  ]
+}
+```
+
+| Field | Rules |
+|---|---|
+| `schema_version` | Must equal `"1"`. |
+| `name` | Non-empty. |
+| `default_table` | A table name from `tables`; required when tables exist. |
+| `tables[].name` | Unique identifier; the semantic table name used by queries. |
+| `tables[].dataset` | An existing dataset id in `project.json`. |
+| `relationships[]` | Unique pair of tables; both columns must exist in their table schemas. |
+| `dimensions[].name` | Unique globally; `table.column` must exist. |
+| `measures[].name` | Unique globally; `expression` is parsed by the safe measure DSL. |
+| `measures[].format` | One of `number`, `integer`, `decimal`, `currency`, `percent`. |
+
+Measures support `count()`, `sum`, `avg`, `min`, `max`, arithmetic and `where` predicates.
+Unqualified columns must be unique across the model; otherwise the model is rejected and the
+column must be written as `table.column`. Validation runs before the model is written and
+again when a semantic engine opens it, so a stale column or dataset cannot reach a query.
+
+The store writes atomically (temporary file, `fsync`, `os.replace`). `SemanticModelStore.derive`
+builds a starter model from the recorded dataset schemas: numeric columns become
+`total_<column>` and `average_<column>` measures, while string, boolean and temporal columns
+become dimensions. It never guesses relationships.
+
+## Dashboards (`dashboards/<id>.json`)
+
+A dashboard is a versioned JSON document that references semantic dimensions and measures.
+It stores no rows and no SQL; every tile is re-queried when the dashboard is rendered.
+
+```json
+{
+  "schema_version": "1",
+  "id": "sales-dashboard",
+  "title": "Sales dashboard",
+  "description": "Revenue overview",
+  "tiles": [
+    {
+      "id": "total",
+      "title": "Total revenue",
+      "kind": "kpi",
+      "dimensions": [],
+      "measures": ["total_amount"],
+      "chart": "column",
+      "filters": [],
+      "order_by": [],
+      "limit": null,
+      "subtitle": "",
+      "width": 1
+    },
+    {
+      "id": "by-region",
+      "title": "Revenue by region",
+      "kind": "chart",
+      "dimensions": ["region"],
+      "measures": ["total_amount"],
+      "chart": "column",
+      "width": 4
+    }
+  ],
+  "slicers": [
+    {"id": "region", "dimension": "region", "title": "Region", "multi": true}
+  ],
+  "created_at": "2026-11-09T09:00:00+00:00",
+  "updated_at": "2026-11-09T09:05:00+00:00"
+}
+```
+
+Rules:
+
+- `id` matches `^[a-z0-9][a-z0-9-]{0,63}$` and must match the filename.
+- Tile ids match `^[a-z0-9][a-z0-9_-]{0,63}$` and are unique within the dashboard.
+- `kind` is `chart`, `kpi` or `table`. A KPI tile has exactly one measure and no dimensions;
+  a chart tile has at least one dimension and one measure; a table tile has at least one
+  dimension or measure.
+- `width` is `1`–`4`; the workspace maps it to 3, 6, 9 or 12 columns of a 12-column grid.
+- `filters` use the same typed filter documents as semantic queries; `order_by` and `limit`
+  apply to the tile query.
+- Every referenced dimension, measure and filter field must exist in the semantic model.
+- Slicer dimensions are unique and apply to every tile. A tile that cannot join a slicer's
+  dimension returns its own error instead of failing the whole dashboard.
+- Files are written atomically and listed in filename order. A corrupt document is reported
+  and skipped so the remaining dashboards still load.
+
+Dashboard HTML reports (`reports/dashboard-<id>.html`) are self-contained: inline CSS,
+inline SVG and no scripts or external URLs. Slicer selections are applied before export.
+
 ## What is not stored yet
 
 The following are reserved by the layout and will be specified when their phases land:
 
-- `dashboards/*.json` dashboard specifications,
-- `models/` model artifacts and registry metadata,
 - `lineage.json` derived-table lineage.
 
 Generated HTML reports (`reports/*.html`) are written by the report exporter. They are
@@ -368,5 +497,5 @@ plain, self-contained artifacts with inline CSS and SVG: no scripts, external as
 or executable payloads. They carry no checksum in the manifest and can be deleted and
 regenerated at any time.
 
-They will follow the same rules: versioned JSON, relative paths, no executable payloads,
-and explicit integrity metadata where files are referenced.
+Reserved files will follow the same rules: versioned JSON, relative paths, no executable
+payloads, and explicit integrity metadata where files are referenced.

@@ -6,15 +6,19 @@ R, SAS, Tableau and Power BI.
 
 **Current status:** Phase 0 (foundation), Phase 1 (kernel MVP), Phase 2A (typed
 descriptive analytics), Phase 2B (inference and regression), Phase 2C (time series,
-chart rendering and HTML reports) and Phase 2D (saved analyses, fingerprint
-invalidation, scheduled refresh and report artifacts) are implemented. The new package can
+chart rendering and HTML reports), Phase 2D (saved analyses, fingerprint
+invalidation, scheduled refresh and report artifacts) and Phase 3A (semantic model,
+safe measure DSL, live dashboards with slicers and dashboard HTML export) are
+implemented. The new package can
 import CSV/Excel/JSON/Parquet/DuckDB files, run an ordered, validated pipeline with
 incremental reruns and undo, profile and summarise the result, run hypothesis tests,
 regressions, time-series decompositions and ARIMA forecasts through the same typed analysis
 registry, render charts as dependency-free SVG, export self-contained HTML reports, persist
-results with freshness tracking, and reopen a project reproducibly. The browser workspace
-has a light/dark theme, a grouped and searchable analysis catalog, contextual help and a
-Saved view for freshness, schedules and report downloads. v0.38 remains a frozen desktop
+results with freshness tracking, derive a star-schema semantic model, compose live dashboards
+from typed dimensions and measures, and reopen a project reproducibly. The browser workspace
+has a light/dark theme, a grouped and searchable analysis catalog, contextual help, a
+Saved view for freshness, schedules and report downloads, and a Dashboards view with
+shared slicers and one-click HTML export. v0.38 remains a frozen desktop
 prototype kept runnable as a reference. See
 [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) for the review, gap analysis and phased plan.
 
@@ -170,6 +174,68 @@ In the workspace, run an analysis and choose **Save analysis**; the **Saved** vi
 freshness, schedules and report downloads. Tooltips and the `?` help dialog explain
 controls without expanding the layout, and the theme toggle follows your OS preference on
 first use.
+
+## Build semantic dashboards
+
+Phase 3A adds a semantic layer between stored datasets and dashboards. A model at
+`models/semantic.json` maps datasets to tables, dimensions (grouping columns) and metrics
+(typed aggregates). Dashboards at `dashboards/<id>.json` reference those names; they never
+store SQL, SQLite files or pre-computed numbers.
+
+```powershell
+data-studio model-derive .\examples\demo --name "Sales model"
+data-studio model-show .\examples\demo
+data-studio query .\examples\demo --dimensions region --measures total_amount `
+  --order "total_amount desc"
+```
+
+Measures use a small, safe DSL rather than raw SQL:
+
+```text
+sum(amount)
+sum(amount) / count()
+sum(units) where region = 'North'
+avg(amount) where sales.region in ('North', 'South')
+```
+
+`count()`, `sum`, `avg`, `min`, `max`, arithmetic, parentheses and `where` predicates are
+supported. Unqualified columns that exist in more than one table are rejected; qualify them
+as `table.column`. References are resolved against the model, quoted, and compiled to
+DuckDB `SUM(...) FILTER (WHERE ...)` expressions, so a project file can never inject SQL.
+
+A derived model includes every numeric column as `total_<column>` and
+`average_<column>` measures and every string, boolean or temporal column as a dimension. It
+does not guess relationships. Add them to `models/semantic.json` when a star schema is
+needed; the query engine plans the required `LEFT JOIN`s and returns a per-tile error instead
+of failing the dashboard when a tile cannot reach a slicer dimension.
+
+```powershell
+data-studio dashboard-save .\examples\demo `
+  --title "Sales performance" `
+  --tiles '[{"id":"total","title":"Total revenue","kind":"kpi","measures":["total_amount"]},
+            {"id":"by-region","title":"Revenue by region","kind":"chart",
+             "dimensions":["region"],"measures":["total_amount"],"chart":"column"}]' `
+  --slicers '[{"id":"region","dimension":"region"}]'
+data-studio dashboard-render .\examples\demo sales-performance --select region=North
+data-studio dashboard-report .\examples\demo sales-performance --select region=North
+```
+
+The workspace **Dashboards** view derives the model, composes KPI/chart/table tiles, applies
+shared slicer chips to every tile, and downloads the current view as a self-contained HTML
+report. The same operations are available over HTTP:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/model` | Read the model, validation problems and available datasets. |
+| `PUT` | `/api/v1/model` | Validate and replace the model. |
+| `POST` | `/api/v1/model/derive` | Derive a starter model from recorded schemas. |
+| `DELETE` | `/api/v1/model` | Remove the model. |
+| `POST` | `/api/v1/model/query` | Run a typed dimension/measure query. |
+| `GET` | `/api/v1/model/dimensions/{name}/values` | List slicer values with search. |
+| `GET` / `POST` | `/api/v1/dashboards` | List or create dashboards. |
+| `GET` / `PUT` / `DELETE` | `/api/v1/dashboards/{id}` | Read, replace or delete one dashboard. |
+| `POST` | `/api/v1/dashboards/{id}/render` | Render tiles with slicer selections. |
+| `GET` / `POST` | `/api/v1/dashboards/{id}/report` | Download HTML, or write it under `reports/`. |
 
 ## Run the legacy prototype
 

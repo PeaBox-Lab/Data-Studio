@@ -443,4 +443,26 @@ def write_html_report(
     return path
 
 
-__all__ = ["render_html_report", "write_html_report"]
+def write_dashboard_report(
+    view: Any,
+    destination: str | Path,
+    *,
+    title: str | None = None,
+    theme: str = "light",
+) -> Path:
+    """Write a standalone dashboard report using the dashboard renderer.
+
+    The import stays inside the function so the analysis reporter has no hard dependency
+    on the semantic/dashboard layer.
+    """
+
+    from ..dashboard.report import write_dashboard_report as _write
+
+    return _write(view, destination, title=title, theme=theme)
+
+
+__all__ = [
+    "render_html_report",
+    "write_dashboard_report",
+    "write_html_report",
+]
