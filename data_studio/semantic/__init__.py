@@ -24,6 +24,8 @@ from .engine import (
     SemanticResult,
 )
 from .model import (
+    GRAINS,
+    GRAIN_PERIODS,
     MEASURE_FORMATS,
     MODEL_SCHEMA_VERSION,
     RELATIONSHIP_KINDS,
@@ -35,13 +37,18 @@ from .model import (
     SemanticModel,
     SemanticTable,
 )
+from .calendar import CALENDAR_DATASET, CalendarError, calendar_sql, generate_calendar
 from .store import MODEL_PATH, SemanticModelStore
 
 __all__ = [
+    "CALENDAR_DATASET",
+    "GRAINS",
+    "GRAIN_PERIODS",
     "MEASURE_FORMATS",
     "MODEL_PATH",
     "MODEL_SCHEMA_VERSION",
     "RELATIONSHIP_KINDS",
+    "CalendarError",
     "CompiledMeasure",
     "MeasureError",
     "QueryFilter",
@@ -59,6 +66,8 @@ __all__ = [
     "SemanticQuery",
     "SemanticResult",
     "SemanticTable",
+    "calendar_sql",
     "compile_measure",
+    "generate_calendar",
     "referenced_columns",
 ]

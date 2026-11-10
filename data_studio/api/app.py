@@ -32,6 +32,7 @@ from ..analysis.saved import (
 from ..dashboard import (
     Dashboard,
     DashboardBookmark,
+    DashboardParameter,
     DashboardRenderer,
     DashboardSlicer,
     DashboardStore,
@@ -49,10 +50,12 @@ from ..project.manifest import safe_project_path
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
 from ..semantic import (
+    CalendarError,
     SemanticEngine,
     SemanticModel,
     SemanticModelStore,
     SemanticQuery,
+    generate_calendar,
 )
 from ..steps import DEFAULT_REGISTRY
 from ..steps.registry import StepError, UnknownStepError
@@ -188,6 +191,7 @@ def create_app(
         # A scheduled refresh must never stop a project from opening.
         with suppress(OSError, ValueError, TypeError, KeyError, RuntimeError):
             SavedAnalysisStore(active).refresh_due(only_on_open=True)
+            DashboardStore(active).refresh_due(only_on_open=True)
 
     def parse_requested_dataset(payload: dict[str, Any]) -> str | None:
         dataset_id = payload.get("dataset")
@@ -669,6 +673,40 @@ def create_app(
         )
         return store.to_dict(model)
 
+    @app.post("/api/v1/model/date-table", status_code=201, tags=["semantic"])
+    def create_date_table(payload: dict[str, Any]) -> dict[str, Any]:
+        start = payload.get("start")
+        end = payload.get("end")
+        if not isinstance(start, str) or not start.strip():
+            raise ValueError("A calendar 'start' date (YYYY-MM-DD) is required.")
+        if not isinstance(end, str) or not end.strip():
+            raise ValueError("A calendar 'end' date (YYYY-MM-DD) is required.")
+        dataset_id = payload.get("dataset", "calendar")
+        if not isinstance(dataset_id, str) or not dataset_id.strip():
+            raise ValueError("'dataset' must be a non-empty dataset id.")
+        overwrite = bool(payload.get("overwrite", False))
+        try:
+            entry = generate_calendar(
+                project(),
+                start=start.strip(),
+                end=end.strip(),
+                dataset_id=dataset_id.strip(),
+                overwrite=overwrite,
+            )
+        except CalendarError as exc:
+            raise ValueError(str(exc)) from exc
+        rederive = bool(payload.get("rederive", False))
+        result: dict[str, Any] = {
+            "dataset": entry.id,
+            "rows": entry.rows,
+            "checksum_sha256": entry.checksum_sha256,
+        }
+        if rederive:
+            store = model_store()
+            model = store.derive(name=f"{project().name} model")
+            result["model"] = store.to_dict(model)
+        return result
+
     @app.delete("/api/v1/model", tags=["semantic"])
     def delete_semantic_model() -> dict[str, str]:
         model_store().remove()
@@ -699,7 +737,12 @@ def create_app(
 
     @app.get("/api/v1/dashboards", tags=["dashboards"])
     def list_dashboards() -> dict[str, Any]:
-        return dashboard_store().to_dict()
+        store = dashboard_store()
+        payload = store.to_dict()
+        model_obj = store.load_model()
+        if model_obj is not None:
+            payload["dashboards"] = store.summaries(model=model_obj)
+        return payload
 
     @app.post("/api/v1/dashboards", status_code=201, tags=["dashboards"])
     def create_dashboard(payload: dict[str, Any]) -> dict[str, Any]:
@@ -724,16 +767,45 @@ def create_app(
                 DashboardBookmark.from_dict(item)
                 for item in payload.get("bookmarks", ())
             )
+            parameters = tuple(
+                DashboardParameter.from_dict(item)
+                for item in payload.get("parameters", ())
+            )
             saved = store.create(
                 title=str(payload.get("title", "")),
                 description=str(payload.get("description", "")),
                 tiles=tiles,
                 slicers=slicers,
                 bookmarks=bookmarks,
+                parameters=parameters,
+                schedule=str(payload.get("schedule", "manual")),
+                report_path=payload.get("report_path"),
                 model=model,
                 overwrite=overwrite,
             )
         return saved.to_dict()
+
+    @app.post("/api/v1/dashboards/refresh", tags=["dashboards"])
+    def refresh_dashboards(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        body = payload or {}
+        if not isinstance(body, dict):
+            raise ValueError("A refresh request must be an object.")
+        store = dashboard_store()
+        dashboard_id = body.get("id") or body.get("dashboard")
+        if dashboard_id is not None:
+            refreshed = [store.refresh(str(dashboard_id))]
+            failures: list[dict[str, str]] = []
+        elif bool(body.get("due", False)):
+            refreshed, failures = store.refresh_due()
+        else:
+            refreshed, failures = store.refresh_all()
+        model_obj = store.load_model()
+        return {
+            "dashboards": [
+                store.describe(item, model=model_obj) for item in refreshed
+            ],
+            "failures": failures,
+        }
 
     @app.get("/api/v1/dashboards/{dashboard_id}", tags=["dashboards"])
     def get_dashboard(dashboard_id: str) -> dict[str, Any]:
@@ -820,6 +892,7 @@ def create_app(
         selections: dict[str, Any] | None = None,
         filters: list[Any] | None = None,
         drill: dict[str, Any] | None = None,
+        parameters: dict[str, Any] | None = None,
     ) -> Any:
         body = payload or {}
         dashboard = dashboard_store().get(dashboard_id)
@@ -829,6 +902,7 @@ def create_app(
             selections=selections or body.get("selections") or {},
             filters=filters if filters is not None else body.get("filters") or (),
             drill=drill if drill is not None else body.get("drill") or {},
+            parameters=parameters if parameters is not None else body.get("parameters") or {},
             theme=theme,
         )
 
@@ -846,12 +920,16 @@ def create_app(
         drill = body.get("drill")
         if drill is not None and not isinstance(drill, dict):
             raise ValueError("Dashboard 'drill' must be an object keyed by tile id.")
+        parameters = body.get("parameters")
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ValueError("Dashboard 'parameters' must be an object.")
         return render_dashboard(
             dashboard_id,
             body,
             theme=theme,
             filters=filters,
             drill=drill,
+            parameters=parameters,
         ).to_dict()
 
     @app.get(
@@ -865,6 +943,7 @@ def create_app(
         selections: str | None = Query(None),
         filters: str | None = Query(None),
         drill: str | None = Query(None),
+        parameters: str | None = Query(None),
     ) -> HTMLResponse:
         if theme not in ("light", "dark"):
             raise ValueError("Dashboard theme must be 'light' or 'dark'.")
@@ -887,6 +966,9 @@ def create_app(
         states = _json_query(drill, "drill") or {}
         if not isinstance(states, dict):
             raise ValueError("'drill' must be a JSON object.")
+        params = _json_query(parameters, "parameters") or {}
+        if not isinstance(params, dict):
+            raise ValueError("'parameters' must be a JSON object.")
         view = render_dashboard(
             dashboard_id,
             {},
@@ -894,6 +976,7 @@ def create_app(
             selections=chosen,
             filters=cross,
             drill=states,
+            parameters=params,
         )
         return HTMLResponse(
             render_dashboard_html(view, theme=theme)

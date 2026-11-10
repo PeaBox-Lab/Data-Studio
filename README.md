@@ -4,23 +4,19 @@ A local-first analytics workbench for cleaning, joining, analyzing, visualizing 
 tabular data. The long-term goal is one platform for the work people currently split across Excel,
 R, SAS, Tableau and Power BI.
 
-**Current status:** Phase 0 (foundation), Phase 1 (kernel MVP), Phase 2A (typed
-descriptive analytics), Phase 2B (inference and regression), Phase 2C (time series,
-chart rendering and HTML reports), Phase 2D (saved analyses, fingerprint
-invalidation, scheduled refresh and report artifacts), Phase 3A (semantic model,
-safe measure DSL, live dashboards with slicers and dashboard HTML export) and Phase 3B
-(tile sorting and top-N, table data bars/heatmaps, saved views and print/PNG export) are
-implemented. The new package can
-import CSV/Excel/JSON/Parquet/DuckDB files, run an ordered, validated pipeline with
-incremental reruns and undo, profile and summarise the result, run hypothesis tests,
-regressions, time-series decompositions and ARIMA forecasts through the same typed analysis
-registry, render charts as dependency-free SVG, export self-contained HTML reports, persist
-results with freshness tracking, derive a star-schema semantic model, compose live dashboards
-from typed dimensions and measures, and reopen a project reproducibly. The browser workspace
-has a light/dark theme, a grouped and searchable analysis catalog, contextual help, a
-Saved view for freshness, schedules and report downloads, and a Dashboards view with
-shared slicers, saved bookmark views and one-click HTML export. v0.38 remains a frozen desktop
-prototype kept runnable as a reference. See
+**Start here - the simple desktop app.** Data Studio now ships a small, friendly desktop app:
+open a file, tidy it, chart it and save it. No jargon, no clutter - just five screens
+(Home, My table, Clean, Charts, Save & share) with undo and a built-in help guide.
+
+```powershell
+.\run_data_studio.bat        # or: python -m data_studio.ui   (after pip install -r requirements.txt)
+```
+
+See [`USER_GUIDE.md`](USER_GUIDE.md) for the two-minute tour.
+
+**Underneath** is the full analytics engine: kernel contracts, project format, CLI and API - phases 0-3B
+(typed analyses, time series, semantic dashboards, saved views). The v0.38 all-features prototype is
+frozen in [`legacy/`](legacy/README.md) and kept runnable as a reference. See
 [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) for the review, gap analysis and phased plan.
 
 ## Documentation
@@ -30,14 +26,16 @@ prototype kept runnable as a reference. See
 | [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) | Measured review of v0.38, gap analysis, target architecture and phased plan. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Architecture decision records: why the web app, kernel, engines and project format. |
 | [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) | The versioned folder project format, paths, checksums and integrity rules. |
-| [`USER_GUIDE_v0.38.md`](USER_GUIDE_v0.38.md) | Guide to the frozen desktop prototype. |
+| [`USER_GUIDE.md`](USER_GUIDE.md) | Two-minute tour of the simple desktop app. |
+| [`legacy/USER_GUIDE_v0.38.md`](legacy/USER_GUIDE_v0.38.md) | Guide to the frozen all-features prototype. |
 
-## The two codebases
+## The pieces
 
 | Path | Purpose |
 |---|---|
-| `data_studio_v0.38.py` + `data_studio_*_v0_38.py` | The legacy desktop prototype. Kept runnable as a reference. Do not add features. |
-| `data_studio/` | The new package: kernel contracts, project format, API, CLI. |
+| `data_studio/ui/` | The simple desktop app (`python -m data_studio.ui`). |
+| `data_studio/` | The analytics package: kernel, project format, API, CLI. |
+| `legacy/` | The frozen v0.38 all-features prototype. Reference only - do not add features. |
 
 ## Setup
 
@@ -250,9 +248,10 @@ The same operations are available over HTTP:
 ## Run the legacy prototype
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install PySide6 matplotlib scipy scikit-learn openpyxl
-.\.venv\Scripts\python.exe data_studio_v0.38.py
+.\legacy\run_data_studio.bat
 ```
+
+(See [`legacy/README.md`](legacy/README.md). Reference only.)
 
 ## Test
 

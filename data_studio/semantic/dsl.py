@@ -8,7 +8,8 @@ The grammar is deliberately tiny:
 
     expression := term (("+" | "-") term)*
     term       := factor (("*" | "/") factor)*
-    factor     := ("+" | "-") factor | number | aggregate | "(" expression ")"
+    factor     := ("+" | "-") factor | number | aggregate | time_intelligence | "(" expression ")"
+    time_intelligence := ("running_total" | "yoy" | "yoy_pct") "(" aggregate ")"
     aggregate  := NAME "(" ("*" | column) ")" ["where" condition]
     condition  := comparison (("and" | "or") comparison)*
     comparison := column OP literal
@@ -16,6 +17,11 @@ The grammar is deliberately tiny:
 Supported aggregates: sum, avg/average, count, count_distinct, min, max, median,
 stddev/stdev and variance. Column names may be qualified as ``table.column`` when a name
 appears in more than one table.
+
+Time-intelligence functions wrap one aggregate and are ordered by the date
+dimension (with a ``grain``) the query groups by: ``running_total(sum(amount))``
+is a cumulative sum, ``yoy(sum(amount))`` is the change against the same period
+in the prior year, and ``yoy_pct(sum(amount))`` is the percentage change.
 """
 
 from __future__ import annotations
@@ -36,6 +42,11 @@ _SUPPORTED_AGGREGATES = {
     "stddev": "STDDEV_SAMP",
     "stdev": "STDDEV_SAMP",
     "variance": "VAR_SAMP",
+}
+_TIME_INTELLIGENCE = {
+    "running_total": "running_total",
+    "yoy": "yoy",
+    "yoy_pct": "yoy_pct",
 }
 _NUMERIC_AGGREGATES = {
     "sum",
@@ -89,6 +100,7 @@ class CompiledMeasure:
     sql: str
     tables: frozenset[str]
     numeric: bool = True
+    needs_time_axis: bool = False
 
 
 # -- AST -------------------------------------------------------------------
@@ -134,6 +146,12 @@ class _Aggregate:
 
 
 @dataclass(frozen=True, slots=True)
+class _TimeIntelligence:
+    func: str
+    inner: _Aggregate
+
+
+@dataclass(frozen=True, slots=True)
 class _Unary:
     operator: str
     operand: _Node
@@ -146,7 +164,7 @@ class _Binary:
     right: _Node
 
 
-_Node = _Number | _Text | _Aggregate | _Unary | _Binary
+_Node = _Number | _Text | _Aggregate | _TimeIntelligence | _Unary | _Binary
 
 
 class _TokenStream:
@@ -269,10 +287,23 @@ class _Parser:
             name = token[1].lower()
             if name in _SUPPORTED_AGGREGATES:
                 return self._aggregate()
+            if name in _TIME_INTELLIGENCE:
+                return self._time_intelligence()
         raise MeasureError(
             f"Expected a number, aggregate or '(' at position {token[2] + 1}, "
             f"found {token[1]!r}."
         )
+
+    def _time_intelligence(self) -> _TimeIntelligence:
+        func = self.stream.expect_ident().lower()
+        self.stream.expect_op("(")
+        node = self._primary()
+        if not isinstance(node, _Aggregate):
+            raise MeasureError(
+                f"{func} requires an aggregate, for example {func}(sum(amount))."
+            )
+        self.stream.expect_op(")")
+        return _TimeIntelligence(func, node)
 
     def _aggregate(self) -> _Aggregate:
         func = self.stream.expect_ident().lower()
@@ -348,10 +379,20 @@ def _sql_literal(value: float | str) -> str:
     return repr(value)
 
 
+# Dummy axis used when validating time-intelligence measures outside a query.
+_DUMMY_AXIS = '"__ds_time_axis__"'
+
+
 class _Compiler:
-    def __init__(self, resolve: Callable[[str], ResolvedColumn]) -> None:
+    def __init__(
+        self,
+        resolve: Callable[[str], ResolvedColumn],
+        time_axis: tuple[str, int] | None = None,
+    ) -> None:
         self.resolve = resolve
+        self.time_axis = time_axis
         self.tables: set[str] = set()
+        self.needs_time_axis = False
 
     def column(self, node: _Column) -> ResolvedColumn:
         column = self.resolve(node.name)
@@ -365,6 +406,8 @@ class _Compiler:
             return _sql_literal(node.value), False
         if isinstance(node, _Aggregate):
             return self.aggregate(node)
+        if isinstance(node, _TimeIntelligence):
+            return self.time_intelligence(node)
         if isinstance(node, _Unary):
             sql, numeric = self.expression(node.operand)
             if not numeric:
@@ -403,6 +446,28 @@ class _Compiler:
             sql = f"{sql} FILTER (WHERE {self.condition(node.condition)})"
         return sql, True
 
+    def time_intelligence(self, node: _TimeIntelligence) -> tuple[str, bool]:
+        inner_sql, inner_numeric = self.aggregate(node.inner)
+        if not inner_numeric:
+            raise MeasureError(f"{node.func} requires a numeric aggregate.")
+        self.needs_time_axis = True
+        axis_sql, periods = self.time_axis or (_DUMMY_AXIS, 1)
+        window = f"OVER (ORDER BY {axis_sql}"
+        if node.func == "running_total":
+            return (
+                f"SUM({inner_sql}) {window} ROWS BETWEEN UNBOUNDED PRECEDING "
+                "AND CURRENT ROW)",
+                True,
+            )
+        lag = f"LAG({inner_sql}, {int(periods)}) {window})"
+        if node.func == "yoy":
+            return f"({inner_sql}) - {lag}", True
+        # yoy_pct: percent change against the same period in the prior year.
+        return (
+            f"(({inner_sql}) - {lag}) * 100.0 / NULLIF({lag}, 0)",
+            True,
+        )
+
     def condition(self, node: _Condition) -> str:
         if isinstance(node, _Comparison):
             column = self.column(node.column)
@@ -424,19 +489,31 @@ class _Compiler:
 def compile_measure(
     expression: str,
     resolve: Callable[[str], ResolvedColumn],
+    time_axis: tuple[str, int] | None = None,
 ) -> CompiledMeasure:
     """Parse and compile a measure expression to SQL.
 
     ``resolve`` maps a column name (optionally ``table.column``) to a
     `ResolvedColumn`; it is responsible for rejecting unknown or ambiguous columns.
+
+    ``time_axis`` is ``(sql_expression, periods_per_year)`` for the date dimension
+    the query groups by. Time-intelligence functions (``running_total``, ``yoy``,
+    ``yoy_pct``) require it; without it they are compiled against a placeholder so
+    model validation can still check the expression, and the result is flagged with
+    ``needs_time_axis`` for the engine to reject at query time.
     """
 
     if not isinstance(expression, str) or not expression.strip():
         raise MeasureError("Measure expression must be a non-empty string.")
     tree = _Parser(expression).parse()
-    compiler = _Compiler(resolve)
+    compiler = _Compiler(resolve, time_axis)
     sql, numeric = compiler.expression(tree)
-    return CompiledMeasure(sql, frozenset(compiler.tables), numeric)
+    return CompiledMeasure(
+        sql,
+        frozenset(compiler.tables),
+        numeric,
+        needs_time_axis=compiler.needs_time_axis,
+    )
 
 
 def referenced_columns(expression: str) -> tuple[str, ...]:
@@ -451,6 +528,11 @@ def referenced_columns(expression: str) -> tuple[str, ...]:
                 names.append(node.column.name)
             if node.condition is not None:
                 visit_condition(node.condition)
+        elif isinstance(node, _TimeIntelligence):
+            if node.inner.column is not None:
+                names.append(node.inner.column.name)
+            if node.inner.condition is not None:
+                visit_condition(node.inner.condition)
         elif isinstance(node, _Unary):
             visit(node.operand)
         elif isinstance(node, _Binary):

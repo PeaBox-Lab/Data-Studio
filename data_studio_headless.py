@@ -1,4 +1,4 @@
-"""Automation orchestrator for Data Studio v0.38.
+﻿"""Automation orchestrator for the legacy Data Studio desktop project format.
 Loads a .pdw project, executes saved or due jobs, applies dependency and retry
 policies, records each run, and atomically persists changes without the GUI.
 """
@@ -14,10 +14,10 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from data_studio_core_v0_38 import validate_dataframe_expression
-from data_studio_state_v0_38 import migrate_project, validate_project
-from data_studio_jobs_v0_38 import next_schedule_time as shared_next_schedule_time, dependency_status as shared_dependency_status, execute_with_retry
-from data_studio_diagnostics_v0_38 import DiagnosticLog
+from data_studio_core import validate_dataframe_expression
+from data_studio_state import migrate_project, validate_project
+from data_studio_jobs import next_schedule_time as shared_next_schedule_time, dependency_status as shared_dependency_status, execute_with_retry
+from data_studio_diagnostics import DiagnosticLog
 import numpy as np
 import pandas as pd
 RUNTIME_VERSION = "0.38"

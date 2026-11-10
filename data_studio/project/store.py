@@ -286,6 +286,52 @@ class Project:
         self._tables.pop(final_id, None)
         return entry
 
+    def add_table(
+        self,
+        table: DuckDBTable,
+        *,
+        dataset_id: str,
+        replace: bool = False,
+        source_name: str = "generated",
+    ) -> DatasetEntry:
+        """Store an engine-created table as a project dataset (e.g. a calendar)."""
+
+        if not isinstance(table, DuckDBTable):
+            raise TypeError("add_table expects a DuckDBTable.")
+        requested = _sanitise_dataset_id(dataset_id)
+        if replace:
+            if requested not in self.dataset_ids():
+                raise ProjectError(f"Cannot replace unknown dataset {requested!r}.")
+            final_id = requested
+        else:
+            final_id = _unique_dataset_id(requested, self.dataset_ids())
+
+        relative = f"datasets/{final_id}.parquet"
+        destination = safe_project_path(self.root, relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        write_table(self.engine, table, destination, overwrite=True)
+        sql = f"SELECT * FROM read_parquet({sql_path(destination)})"
+        schema = self.engine.describe(sql)
+        stored = self._table_for_parquet(destination, final_id, schema)
+        rows = stored.count()
+        entry = DatasetEntry(
+            id=final_id,
+            path=relative,
+            format=DatasetFormat.PARQUET,
+            schema=stored.schema,
+            checksum_sha256=sha256_file(destination),
+            rows=rows,
+            source=source_name,
+        )
+        manifest = (
+            self.manifest.replace_dataset(entry)
+            if replace
+            else self.manifest.add_dataset(entry)
+        )
+        self.manifest = save_manifest(self.root, manifest)
+        self._tables.pop(final_id, None)
+        return entry
+
     def add_dataset_bytes(
         self,
         data: bytes,

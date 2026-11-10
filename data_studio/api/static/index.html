@@ -366,6 +366,26 @@
   .slicer-chip:hover { border-color: var(--accent); color: var(--accent); }
   .slicer-chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 700; }
   .slicer-note { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+  .param-bar { display: flex; flex-wrap: wrap; gap: 10px; }
+  .param-group { display: grid; gap: 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 7px 10px; min-width: 150px; }
+  .param-group label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .param-group input, .param-group select { width: 100%; min-width: 0; font-size: 12px; }
+  .param-group .check { font-size: 12px; }
+  .cross-filter-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .cross-filter-bar:empty { display: none; }
+  .cross-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 2px 6px 2px 9px; font-size: 11px; font-weight: 600; }
+  .cross-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 12px; line-height: 1; padding: 0 2px; font-weight: 700; }
+  .drill-bar { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .drill-bar button { border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); border-radius: 6px; padding: 1px 6px; font-size: 11px; }
+  .drill-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .drill-bar button[disabled] { opacity: .55; }
+  .drill-bar .sep { color: var(--muted); }
+  .tile-details { border-top: 1px dashed var(--line); padding-top: 6px; font-size: 10.5px; color: var(--muted); display: grid; gap: 4px; }
+  .tile-details pre { margin: 0; max-height: 110px; overflow: auto; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 10px; white-space: pre-wrap; word-break: break-all; }
+  .dash-tile [data-ds-value] { cursor: pointer; }
+  .cell-drill { cursor: pointer; }
+  .cell-drill:hover { text-decoration: underline dotted; }
+  .dash-tile .schedule-pill { display: inline-flex; gap: 5px; align-items: center; }
   .dash-canvas { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
   .dash-tile {
     display: grid; gap: 8px; align-content: start; min-width: 0;
@@ -725,6 +745,14 @@
               <div class="card-head">
                 <div><span class="eyebrow">Canvas</span><h2 id="dashboardHeading">No dashboard selected</h2></div>
                 <div class="actions">
+                  <span class="pill gray" id="dashboardFreshness" hidden>Fresh</span>
+                  <select id="dashboardSchedule" aria-label="Refresh schedule" data-tip="How often this dashboard should refresh on project open / the scheduler (data-studio refresh --due)">
+                    <option value="manual">Manual refresh</option>
+                    <option value="on_open">On project open</option>
+                    <option value="hourly">Hourly</option>
+                    <option value="daily">Daily</option>
+                  </select>
+                  <button class="btn sm" id="refreshDashboardNow" data-tip="Re-query every tile now and stamp the dashboard fresh" disabled>Refresh now</button>
                   <select id="dashboardTheme" aria-label="Chart theme" data-tip="Chart colour theme; the report uses the same choice">
                     <option value="light">Light charts</option>
                     <option value="dark">Dark charts</option>
@@ -746,6 +774,8 @@
                   <span class="muted-inline" id="bookmarkHint">Views restore slicer selections; tiles and exports follow the active view.</span>
                 </div>
                 <div id="slicerBar" class="slicer-bar"></div>
+                <div id="parameterBar" class="param-bar"></div>
+                <div id="crossFilterBar" class="cross-filter-bar"></div>
                 <div id="dashboardCanvas" class="dash-canvas">
                   <p class="dash-empty">Open a project, derive a semantic model, then create a dashboard.</p>
                 </div>
@@ -877,6 +907,11 @@
         <button class="btn sm" type="button" id="addSlicer" data-tip="Add a shared filter that applies to every tile">Add slicer</button>
       </div>
       <div id="slicerRows" class="dash-tile-list"></div>
+      <div class="section-head">
+        <h3 class="section-title">Parameters</h3>
+        <button class="btn sm" type="button" id="addParameter" data-tip="Add a what-if parameter that a tile can reference as @name (e.g. minimum revenue, top-N)">Add parameter</button>
+      </div>
+      <div id="parameterRows" class="dash-tile-list"></div>
       <p class="status" id="dashboardFormStatus"></p>
     </div>
     <div class="dialog-foot">
@@ -994,6 +1029,10 @@ const state = {
   slicerSelections: {},
   slicerValues: {},
   activeBookmark: "",
+  parameterValues: {},
+  crossFilters: [],
+  drillSelections: {},
+  dashboardSchedules: ["manual", "on_open", "hourly", "daily"],
   dashboardRequest: 0,
   autoRefresh: localStorage.getItem("dataStudio.autoRefresh") !== "false",
   collapsedCategories: new Set(),
@@ -2215,7 +2254,7 @@ async function downloadSavedReport(id) {
   }
 }
 
-async function pollSaved() {
+async function pollDueSchedules() {
   if (!state.project || document.hidden || !state.autoRefresh) return;
   try {
     const payload = await api("/api/v1/saved-analyses/refresh", {
@@ -2229,6 +2268,24 @@ async function pollSaved() {
   } catch (_) {
     // Polling is best-effort; explicit Refresh and the CLI remain available.
   }
+  try {
+    const payload = await api("/api/v1/dashboards/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ due: true })
+    });
+    const refreshed = (payload.dashboards || []).length;
+    if (refreshed) {
+      await refreshDashboards({ quiet: true });
+      toast(`${refreshed} dashboard(s) refreshed on schedule.`, "success");
+    }
+  } catch (_) {
+    // Polling is best-effort; explicit Refresh and the CLI remain available.
+  }
+}
+
+function pollSaved() {
+  return pollDueSchedules();
 }
 
 function startSavedPolling() {
@@ -2295,6 +2352,24 @@ function currentDashboard() {
   return state.dashboards.find((item) => item.id === state.selectedDashboard) || null;
 }
 
+function activeParameters() {
+  const params = {};
+  for (const [name, value] of Object.entries(state.parameterValues)) {
+    if (value !== undefined && value !== null && value !== "") params[name] = value;
+  }
+  return params;
+}
+
+function coerceDatum(value) {
+  const text = String(value).trim();
+  if (text === "") return value;
+  if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
+  if (text.toLowerCase() === "true") return true;
+  if (text.toLowerCase() === "false") return false;
+  if (text.toLowerCase() === "null") return null;
+  return value;
+}
+
 function activeSlicerSelections() {
   const selections = {};
   for (const [id, values] of Object.entries(state.slicerSelections)) {
@@ -2345,6 +2420,9 @@ async function refreshDashboards({ quiet = false } = {}) {
     state.slicerSelections = {};
     state.slicerValues = {};
     state.activeBookmark = "";
+  state.parameterValues = {};
+  state.crossFilters = [];
+  state.drillSelections = {};
     renderDashboardList();
     renderDashboardCanvas();
     return;
@@ -2364,6 +2442,9 @@ async function refreshDashboards({ quiet = false } = {}) {
     state.slicerSelections = {};
     state.slicerValues = {};
     state.activeBookmark = "";
+  state.parameterValues = {};
+  state.crossFilters = [];
+  state.drillSelections = {};
     state.dashboardView = null;
     state.dashboardRequest += 1;
   }
@@ -2505,16 +2586,26 @@ function renderDashboardList() {
   }
   for (const dashboard of state.dashboards) {
     const active = dashboard.id === state.selectedDashboard;
+    const schedule = dashboard.schedule && dashboard.schedule !== "manual"
+      ? dashboard.schedule : null;
+    const stale = dashboard.status === "stale";
+    const meta = [
+      `${dashboard.tiles.length} tiles · ${dashboard.slicers.length} slicers`,
+      schedule ? `refresh: ${schedule}` : null,
+      stale ? "stale" : null,
+    ].filter(Boolean).join(" · ");
     const item = el("button", {
       class: `dash-item ${active ? "active" : ""}`,
       type: "button",
-      "data-tip": dashboard.description || `${dashboard.id} · ${dashboard.tiles.length} tiles`
+      "data-tip": dashboard.description || `${dashboard.id} · ${meta}`
     },
       el("div", { class: "ds-main" },
         el("strong", { text: dashboard.title }),
-        el("span", { class: "meta", text: `${dashboard.tiles.length} tiles · ${dashboard.slicers.length} slicers` })
+        el("span", { class: "meta", text: meta })
       ),
-      el("span", { class: "pill tag", text: String(dashboard.tiles.length) })
+      stale
+        ? el("span", { class: "pill warn", text: "stale" })
+        : el("span", { class: "pill tag", text: String(dashboard.tiles.length) })
     );
     item.addEventListener("click", () => selectDashboard(dashboard.id));
     list.append(item);
@@ -2527,6 +2618,9 @@ async function selectDashboard(id) {
   state.slicerSelections = {};
   state.slicerValues = {};
   state.activeBookmark = "";
+  state.parameterValues = {};
+  state.crossFilters = [];
+  state.drillSelections = {};
   state.dashboardView = null;
   state.dashboardRequest += 1;
   renderDashboardList();
@@ -2600,6 +2694,93 @@ function renderSlicerBar(dashboard) {
     if (payload.truncated) group.append(el("div", { class: "slicer-note", text: "Showing the first 60 values." }));
     bar.append(group);
   }
+}
+
+function toggleCrossFilter(field, value) {
+  const key = (item) => `${item.field} ${JSON.stringify(item.value)}`;
+  const entry = { field, operator: "=", value };
+  const index = state.crossFilters.findIndex((item) => key(item) === key(entry));
+  if (index >= 0) state.crossFilters.splice(index, 1);
+  else state.crossFilters = [...state.crossFilters, entry];
+  renderDashboardCanvas();
+  renderDashboardTiles({ quiet: true });
+}
+
+function renderCrossFilterBar() {
+  const bar = document.getElementById("crossFilterBar");
+  if (!bar) return;
+  bar.replaceChildren();
+  if (!state.crossFilters.length) return;
+  bar.append(el("span", { class: "muted-inline", text: "Cross-filtered by:" }));
+  for (const filter of state.crossFilters) {
+    const chip = el("span", { class: "cross-chip" },
+      el("span", { text: `${filter.field} = ${formatCell(filter.value)}` }));
+    const remove = el("button", { type: "button", text: "×", "aria-label": `Remove filter ${filter.field}` });
+    remove.addEventListener("click", () => toggleCrossFilter(filter.field, filter.value));
+    chip.append(remove);
+    bar.append(chip);
+  }
+  const clear = el("button", { class: "btn sm ghost", type: "button", text: "Clear all" });
+  clear.addEventListener("click", () => {
+    state.crossFilters = [];
+    renderDashboardCanvas();
+    renderDashboardTiles({ quiet: true });
+  });
+  bar.append(clear);
+}
+
+function parameterValue(parameter) {
+  const chosen = state.parameterValues[parameter.name];
+  if (chosen !== undefined && chosen !== null) return chosen;
+  return parameter.default;
+}
+
+function renderParameterBar(dashboard) {
+  const bar = document.getElementById("parameterBar");
+  if (!bar) return;
+  bar.replaceChildren();
+  const parameters = (dashboard && dashboard.parameters) || [];
+  if (!parameters.length) return;
+  for (const parameter of parameters) {
+    const group = el("div", { class: "param-group" });
+    const id = `param-${parameter.name}`;
+    group.append(el("label", { for: id, text: parameter.title || parameter.name }));
+    if (parameter.type === "number") {
+      const input = el("input", {
+        id, type: "number",
+        value: parameterValue(parameter),
+        min: parameter.minimum ?? null,
+        max: parameter.maximum ?? null,
+        step: parameter.step ?? "any"
+      });
+      input.addEventListener("change", () => setParameterValue(parameter, input.value === "" ? undefined : Number(input.value)));
+      group.append(input);
+    } else if (parameter.type === "text") {
+      const input = el("input", { id, type: "text", value: parameterValue(parameter) ?? "" });
+      input.addEventListener("change", () => setParameterValue(parameter, input.value));
+      group.append(input);
+    } else if (parameter.type === "boolean") {
+      const input = el("input", { id, type: "checkbox" });
+      input.checked = Boolean(parameterValue(parameter));
+      input.addEventListener("change", () => setParameterValue(parameter, input.checked));
+      group.append(el("label", { class: "check" }, input, "On"));
+    } else if (parameter.type === "choice") {
+      const select = el("select", { id });
+      for (const option of parameter.options || []) {
+        select.append(el("option", { value: option, text: String(option) }));
+      }
+      select.value = String(parameterValue(parameter));
+      select.addEventListener("change", () => setParameterValue(parameter, coerceDatum(select.value)));
+      group.append(select);
+    }
+    bar.append(group);
+  }
+}
+
+function setParameterValue(parameter, value) {
+  if (value === undefined) delete state.parameterValues[parameter.name];
+  else state.parameterValues[parameter.name] = value;
+  renderDashboardTiles({ quiet: true });
 }
 
 function setSlicerValues(id, values) {
@@ -2677,6 +2858,57 @@ function replaceDashboardInState(dashboard) {
   else state.dashboards.push(dashboard);
 }
 
+function renderDashboardSchedule(dashboard) {
+  const select = document.getElementById("dashboardSchedule");
+  const pill = document.getElementById("dashboardFreshness");
+  const refresh = document.getElementById("refreshDashboardNow");
+  if (select) {
+    select.disabled = !dashboard || !state.model;
+    if (dashboard) select.value = dashboard.schedule || "manual";
+  }
+  if (refresh) refresh.disabled = !dashboard || !state.model;
+  if (pill) {
+    if (!dashboard) {
+      pill.hidden = true;
+      return;
+    }
+    pill.hidden = false;
+    const status = dashboard.status || "fresh";
+    if (status === "fresh") {
+      pill.textContent = "Fresh";
+      pill.className = "pill green";
+      pill.setAttribute("data-tip", dashboard.refreshed_at ? `Refreshed ${dashboard.refreshed_at}` : "Up to date");
+    } else if (status === "missing") {
+      pill.textContent = "Model missing";
+      pill.className = "pill warn";
+      pill.setAttribute("data-tip", "The semantic model or its datasets could not be fingerprinted; refresh to rebuild.");
+    } else {
+      pill.textContent = "Stale";
+      pill.className = "pill warn";
+      pill.setAttribute("data-tip", "Inputs changed since the last refresh; press Refresh now or wait for the schedule.");
+    }
+  }
+}
+
+async function refreshDashboardNow() {
+  const dashboard = currentDashboard();
+  if (!dashboard) return;
+  const payload = await task(
+    () => api("/api/v1/dashboards/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: dashboard.id })
+    }),
+    "dashStatus",
+    "Dashboard refreshed."
+  );
+  if (!payload) return;
+  const refreshed = (payload.dashboards || [])[0];
+  if (refreshed) replaceDashboardInState(refreshed);
+  await refreshDashboards({ quiet: true });
+  toast("Tiles re-rendered; document stamped fresh.", "success");
+}
+
 async function saveBookmark() {
   const dashboard = currentDashboard();
   if (!dashboard) return;
@@ -2738,6 +2970,9 @@ function renderDashboardCanvas() {
   }
   renderBookmarkBar(dashboard);
   renderSlicerBar(dashboard);
+  renderParameterBar(dashboard);
+  renderCrossFilterBar();
+  renderDashboardSchedule(dashboard);
 
   const canvas = document.getElementById("dashboardCanvas");
   if (!canvas) return;
@@ -2763,6 +2998,71 @@ function renderDashboardCanvas() {
     return;
   }
   canvas.replaceChildren(...view.tiles.map((tile) => renderDashboardTile(tile)));
+}
+
+function hierarchyFor(tile) {
+  const hierarchies = (state.model && state.model.hierarchies) || [];
+  return hierarchies.find((item) => item.name === tile.hierarchy) || null;
+}
+
+function setDrill(tileId, level, values) {
+  const next = { ...state.drillSelections };
+  if (!level && (!values || !values.length)) delete next[tileId];
+  else next[tileId] = { level, values };
+  state.drillSelections = next;
+  renderDashboardTiles({ quiet: true });
+}
+
+function drillResetTile(tileId) {
+  setDrill(tileId, 0, []);
+}
+
+function buildDrillBar(tile, tileView) {
+  const hierarchy = hierarchyFor(tile);
+  if (!hierarchy) return null;
+  const level = tileView.level || 0;
+  const path = tileView.path || [];
+  const bar = el("div", { class: "drill-bar", role: "navigation", "aria-label": "Drill path" });
+  bar.append(el("span", { text: "Drill" }));
+  const allButton = el("button", { type: "button", text: "All", disabled: level === 0 });
+  allButton.addEventListener("click", () => setDrill(tile.id, 0, []));
+  bar.append(allButton);
+  path.forEach((node, index) => {
+    bar.append(el("span", { class: "sep", text: "›" }));
+    const crumb = el("button", {
+      type: "button",
+      text: String(node.value),
+      disabled: index === path.length - 1
+    });
+    crumb.addEventListener("click", () => {
+      setDrill(
+        tile.id,
+        index + 1,
+        path.slice(0, index + 1).map((entry) => entry.value)
+      );
+    });
+    bar.append(crumb);
+  });
+  if (level < hierarchy.levels.length) {
+    bar.append(el("span", { class: "sep", text: "·" }));
+    bar.append(el("span", { class: "muted-inline", text: `level: ${hierarchy.levels[level]}` }));
+  }
+  return bar;
+}
+
+function tileDetailsBlock(tile, tileView) {
+  const result = tileView.result;
+  if (!result) return null;
+  const lines = [
+    `Dimensions: ${tile.hierarchy ? `hierarchy ${tile.hierarchy}` : (tile.dimensions || []).join(", ") || "—"}`,
+    `Measures: ${(tile.measures || []).join(", ") || "—"}`,
+    `Elapsed: ${result.elapsed_ms ?? 0} ms · rows: ${result.row_count ?? 0}`,
+  ];
+  const details = el("div", { class: "tile-details", hidden: true },
+    el("div", { class: "row", text: lines.join("  ·  ") }),
+    el("pre", { text: result.sql || "" })
+  );
+  return details;
 }
 
 function renderDashboardTile(tileView) {
@@ -2798,6 +3098,14 @@ function renderDashboardTile(tileView) {
     card.append(el("p", { class: "empty", text: "No result." }));
     return card;
   }
+
+  const hierarchy = hierarchyFor(tile);
+  const drillBar = hierarchy ? buildDrillBar(tile, tileView) : null;
+  if (drillBar) card.append(drillBar);
+
+  const dimensionColumn = (result.columns || []).find((column) => column.kind === "dimension");
+  const dimensionField = dimensionColumn ? dimensionColumn.name : null;
+
   if (tile.kind === "kpi") {
     const row = (result.rows && result.rows[0]) || {};
     card.append(el("div", { class: "dash-kpi" }, ...result.columns.map((column) =>
@@ -2806,16 +3114,56 @@ function renderDashboardTile(tileView) {
         el("div", { class: "value", text: formatMeasure(row[column.name], column.format) })
       )
     )));
+    appendTileDetails(card, tile, tileView, head);
     return card;
   }
   if (tile.kind === "chart" && tileView.svg) {
     const holder = el("div", { class: "dash-svg" });
     holder.innerHTML = tileView.svg;
+    if (dimensionField) {
+      holder.addEventListener("click", (event) => {
+        const target = event.target && event.target.closest
+          ? event.target.closest("[data-ds-value]")
+          : null;
+        if (!target) return;
+        const value = coerceDatum(target.getAttribute("data-ds-value"));
+        const level = tileView.level || 0;
+        const ancestors = (tileView.path || []).map((node) => node.value);
+        if (hierarchy && level < hierarchy.levels.length) {
+          setDrill(tile.id, level + 1, [...ancestors, value]);
+          return;
+        }
+        toggleCrossFilter(dimensionField, value);
+      });
+    }
     card.append(holder);
+    appendTileDetails(card, tile, tileView, head);
     return card;
   }
-  card.append(buildResultTable(result, tileView.percentages || [], tile.table_style || "plain"));
+  card.append(buildResultTable(
+    result,
+    tileView.percentages || [],
+    tile.table_style || "plain",
+    dimensionField ? { onCellClick: (value) => toggleCrossFilter(dimensionField, coerceDatum(value)) } : null
+  ));
+  appendTileDetails(card, tile, tileView, head);
   return card;
+}
+
+function appendTileDetails(card, tile, tileView, head) {
+  const details = tileDetailsBlock(tile, tileView);
+  if (!details) return;
+  const button = el("button", {
+    type: "button",
+    class: "btn sm ghost",
+    text: "SQL",
+    "data-tip": "Show the dimensions, measures and query behind this tile"
+  });
+  button.addEventListener("click", () => {
+    details.hidden = !details.hidden;
+  });
+  head.append(button);
+  card.append(details);
 }
 
 function tableCellStyle(style, percentage) {
@@ -2832,7 +3180,7 @@ function tableCellStyle(style, percentage) {
   return "";
 }
 
-function buildResultTable(result, percentages = [], style = "plain") {
+function buildResultTable(result, percentages = [], style = "plain", options = null) {
   const wrap = el("div", { class: "table-wrap" });
   if (!result.columns || !result.columns.length) {
     wrap.append(el("p", { class: "empty", text: "No columns." }));
@@ -2847,15 +3195,32 @@ function buildResultTable(result, percentages = [], style = "plain") {
   if (!result.rows || !result.rows.length) {
     body.append(el("tr", {}, el("td", { colspan: String(result.columns.length), class: "empty", text: "No rows." })));
   } else {
+    const clickableField = options && options.onCellClick
+      ? (result.columns.find((column) => column.kind === "dimension") || {}).name
+      : null;
     result.rows.forEach((row, rowIndex) => {
       const tr = el("tr");
       result.columns.forEach((column, columnIndex) => {
         const numeric = column.kind === "measure";
         const rowPercentages = percentages[rowIndex] || [];
         const cellStyle = numeric ? tableCellStyle(style, rowPercentages[columnIndex]) : "";
-        tr.append(el("td", { class: numeric ? "num" : "", style: cellStyle || null }, numeric
+        const cell = el("td", { class: numeric ? "num" : "", style: cellStyle || null }, numeric
           ? formatMeasure(row[column.name], column.format)
-          : formatCell(row[column.name])));
+          : formatCell(row[column.name]));
+        if (clickableField && column.name === clickableField) {
+          cell.classList.add("cell-drill");
+          cell.setAttribute("role", "button");
+          cell.setAttribute("tabindex", "0");
+          cell.setAttribute("data-tip", `Click to cross-filter by ${column.name}`);
+          cell.addEventListener("click", () => options.onCellClick(row[column.name]));
+          cell.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              options.onCellClick(row[column.name]);
+            }
+          });
+        }
+        tr.append(cell);
       });
       body.append(tr);
     });
@@ -2923,7 +3288,14 @@ async function renderDashboardTiles({ quiet = false } = {}) {
     const view = await api(`/api/v1/dashboards/${encodeURIComponent(dashboard.id)}/render`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selections, theme: state.dashboardTheme, use_pipeline: true })
+      body: JSON.stringify({
+        selections,
+        theme: state.dashboardTheme,
+        use_pipeline: true,
+        parameters: activeParameters(),
+        filters: state.crossFilters,
+        drill: state.drillSelections
+      })
     });
     if (token !== state.dashboardRequest) return;
     state.dashboardView = view;
@@ -2947,6 +3319,9 @@ async function removeDashboard() {
     state.slicerSelections = {};
     state.slicerValues = {};
     state.activeBookmark = "";
+  state.parameterValues = {};
+  state.crossFilters = [];
+  state.drillSelections = {};
     await refreshDashboards({ quiet: true });
     return true;
   }, "dashStatus", "Dashboard deleted.");
@@ -2959,6 +3334,10 @@ async function downloadDashboardReport() {
   const query = new URLSearchParams({ theme: state.dashboardTheme });
   const selections = activeSlicerSelections();
   if (Object.keys(selections).length) query.set("selections", JSON.stringify(selections));
+  const parameters = activeParameters();
+  if (Object.keys(parameters).length) query.set("parameters", JSON.stringify(parameters));
+  if (state.crossFilters.length) query.set("filters", JSON.stringify(state.crossFilters));
+  if (Object.keys(state.drillSelections).length) query.set("drill", JSON.stringify(state.drillSelections));
   try {
     const response = await fetch(`/api/v1/dashboards/${encodeURIComponent(dashboard.id)}/report?${query.toString()}`);
     const text = await response.text();
@@ -3077,6 +3456,10 @@ function buildTileRow(tile) {
   const width = selectControl(["1", "2", "3", "4"], String(base.width || 1), {
     1: "1 · quarter", 2: "2 · third", 3: "3 · half", 4: "4 · full"
   });
+  const hierarchies = (state.model && state.model.hierarchies) || [];
+  const hierarchy = selectControl(["", ...hierarchies.map((item) => item.name)], base.hierarchy || "", {
+    "": "No hierarchy"
+  });
   const dimensions = multiSelectControl(state.model.dimensions, base.dimensions || []);
   const measures = multiSelectControl(state.model.measures, base.measures || []);
   const subtitle = el("input", { value: base.subtitle || "", placeholder: "Optional subtitle" });
@@ -3085,9 +3468,36 @@ function buildTileRow(tile) {
     asc: "Ascending", desc: "Descending"
   });
   const limit = el("input", {
-    type: "number", min: "1", step: "1", value: base.limit || "", placeholder: "All rows"
+    type: "text", value: base.limit === undefined || base.limit === null ? "" : String(base.limit),
+    placeholder: "All rows or @parameter"
   });
   const tableStyle = selectControl(TABLE_STYLES, base.table_style || "plain", TABLE_STYLE_LABELS);
+  const filterRows = el("div", { class: "filter-rows" });
+  const addFilter = el("button", { type: "button", class: "btn xs ghost", text: "+ Add filter" });
+  addFilter.addEventListener("click", () => filterRows.append(buildFilterRow(null)));
+  const filterFieldOptions = [...state.model.dimensions.map((item) => item.name), ...state.model.measures.map((item) => item.name)];
+  function buildFilterRow(filter) {
+    const row = el("div", { class: "filter-row" });
+    const field = selectControl(filterFieldOptions, (filter && filter.field) || filterFieldOptions[0] || "");
+    const operator = selectControl(["=", "!=", ">", ">=", "<", "<=", "in", "not_in", "contains"], (filter && filter.operator) || "=");
+    const existing = filter && filter.value !== undefined ? (Array.isArray(filter.value) ? filter.value.join(", ") : String(filter.value)) : "";
+    const value = el("input", { value: existing, placeholder: "literal or @parameter" });
+    const remove = el("button", { type: "button", class: "btn xs danger", text: "×", "aria-label": "Remove filter" });
+    remove.addEventListener("click", () => row.remove());
+    row.append(field, operator, value, remove);
+    row._collect = () => {
+      const raw = value.value.trim();
+      let parsed = raw;
+      if (operator.value === "in" || operator.value === "not_in") {
+        parsed = raw.split(",").map((part) => coerceDatum(part.trim())).filter((part) => part !== "");
+      } else {
+        parsed = raw.startsWith("@") ? raw : coerceDatum(raw);
+      }
+      return { field: field.value, operator: operator.value, value: parsed };
+    };
+    return row;
+  }
+  for (const filter of base.filters || []) filterRows.append(buildFilterRow(filter));
 
   const syncOrderOptions = () => {
     const previous = order.value;
@@ -3261,6 +3671,9 @@ async function submitDashboard(event) {
   state.slicerSelections = {};
   state.slicerValues = {};
   state.activeBookmark = "";
+  state.parameterValues = {};
+  state.crossFilters = [];
+  state.drillSelections = {};
   state.dashboardView = null;
   await refreshDashboards({ quiet: true });
   if (state.view !== "dashboards") navigate("dashboards");
@@ -3471,6 +3884,26 @@ function bindEvents() {
     await refreshDashboards({ quiet: true });
     toast("Dashboards refreshed.");
   }, "dashStatus", ""));
+  document.getElementById("dashboardSchedule").addEventListener("change", async (event) => {
+    const dashboard = currentDashboard();
+    if (!dashboard) return;
+    const payload = { ...dashboard, schedule: event.target.value };
+    const saved = await task(
+      () => api(`/api/v1/dashboards/${encodeURIComponent(dashboard.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }),
+      "dashStatus",
+      "Schedule updated."
+    );
+    if (saved) {
+      replaceDashboardInState(saved);
+      renderDashboardList();
+      renderDashboardCanvas();
+    }
+  });
+  document.getElementById("refreshDashboardNow").addEventListener("click", refreshDashboardNow);
   document.getElementById("dashboardTheme").addEventListener("change", (event) => {
     state.dashboardTheme = event.target.value === "dark" ? "dark" : "light";
     localStorage.setItem("dataStudio.dashboardTheme", state.dashboardTheme);

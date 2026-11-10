@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from ..engine.duckdb_engine import sql_literal
 from ..kernel.schema import TableSchema
 from .dsl import CompiledMeasure, MeasureError
-from .model import SemanticError, SemanticModel
+from .model import GRAIN_PERIODS, SemanticError, SemanticModel
 
 if TYPE_CHECKING:
     from ..project.store import Project
@@ -334,13 +334,20 @@ class SemanticEngine:
     def schemas(self) -> Mapping[str, TableSchema]:
         return self._schemas
 
-    def compiled_measure(self, name: str) -> CompiledMeasure:
-        if name not in self._measure_cache:
+    def compiled_measure(
+        self,
+        name: str,
+        time_axis: tuple[str, int] | None = None,
+    ) -> CompiledMeasure:
+        key = f"{name}|{time_axis[0] if time_axis else ''}"
+        if key not in self._measure_cache:
             try:
-                self._measure_cache[name] = self.model.compiled_measure(name, self._schemas)
+                self._measure_cache[key] = self.model.compiled_measure(
+                    name, self._schemas, time_axis=time_axis
+                )
             except MeasureError as exc:
                 raise SemanticError(f"Measure {name!r}: {exc}") from exc
-        return self._measure_cache[name]
+        return self._measure_cache[key]
 
     def _table_sql(self, table_name: str) -> str:
         if table_name in self._table_sql_cache:
@@ -429,6 +436,11 @@ class SemanticEngine:
             measure = None
         if measure is not None:
             compiled = self.compiled_measure(field)
+            if compiled.needs_time_axis:
+                raise SemanticError(
+                    f"Measure {field!r} uses time intelligence and cannot be "
+                    "used as a filter."
+                )
             return compiled.sql, set(compiled.tables), True
         try:
             dimension = self.model.dimension(field)
@@ -499,13 +511,29 @@ class SemanticEngine:
             group_sql.append(expression)
             referenced.add(dimension.table)
 
+        time_axis: tuple[str, int] | None = None
+        for name in query.dimensions:
+            dimension = self.model.dimension(name)
+            if dimension.grain:
+                time_axis = (
+                    f'"{_alias(dimension.table)}"."{dimension.column}"',
+                    GRAIN_PERIODS[dimension.grain],
+                )
+                break
+
         measure_sql: list[str] = []
         for name in query.measures:
             try:
                 self.model.measure(name)
             except KeyError as exc:
                 raise SemanticError(f"Unknown measure {name!r}.") from exc
-            compiled = self.compiled_measure(name)
+            compiled = self.compiled_measure(name, time_axis)
+            if compiled.needs_time_axis and time_axis is None:
+                raise SemanticError(
+                    f"Measure {name!r} uses time intelligence; group the query "
+                    "by a date dimension with a grain (set one on the dimension "
+                    "in the model, for example the calendar month)."
+                )
             measure_sql.append(f'{compiled.sql} AS "{name}"')
             referenced.update(compiled.tables)
 

@@ -1,14 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import tempfile
 import unittest
 from datetime import UTC, datetime
 from pathlib import Path
 
-from data_studio_diagnostics_v0_38 import DiagnosticLog
-from data_studio_jobs_v0_38 import dependency_status, execute_with_retry, next_schedule_time
-from data_studio_state_v0_38 import migrate_project, validate_project
-from data_studio_tasks_v0_38 import TaskManager
+from data_studio_diagnostics import DiagnosticLog
+from data_studio_jobs import dependency_status, execute_with_retry, next_schedule_time
+from data_studio_state import migrate_project, validate_project
+from data_studio_tasks import TaskManager
 
 
 class ArchitectureTests(unittest.TestCase):
