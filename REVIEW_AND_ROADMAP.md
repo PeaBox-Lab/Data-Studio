@@ -503,13 +503,14 @@ validation lists; the workspace owns conditional formatting and the formula bar)
   inline, R via `Rscript`); the Python script needs only `duckdb` + `pandas`, the R
   script only `duckdb` + `DBI`. Provenance header lists every step with its id.
 
-**Done when:** a user can replace a routine Excel workbook with a saved, reproducible project.
+**Done when:** a user can replace a routine Excel workbook with a saved, reproducible project, and the system can handle 10M+ row datasets within 30 seconds.
 
 ### Phase 5 — ML, scale and extension (ongoing)
 
 - ML experiment contract, leaderboard, explainability, registry, monitoring (reuse the good v0.38 ideas).
 - Plugin API for sources, steps, analyses, charts, targets.
-- Performance budgets (10M rows), accessibility, packaging/installer, auth for API, collaboration/publish.
+- Performance budgets (10M rows, <30s) — **baseline established**: 10M-row DuckDB aggregation completed in ~0.2s, well within the 30s budget.
+- Accessibility, packaging/installer, auth for API, collaboration/publish.
 
 **Done when:** third-party steps can be installed safely and performance is measured, not claimed.
 

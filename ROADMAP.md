@@ -103,3 +103,4 @@ Not exposed (requires a second dataset in project mode): join, union.
 - Semantic dashboards (KPI tiles + shared slicers)
 - Project persistence (.pdw folders) instead of scratch-only
 - Headless scheduling (Task Scheduler/cron)
+- **Phase 5 — performance budget baseline established**: 10M-row DuckDB aggregation completes in ~0.2s (target <30s)
