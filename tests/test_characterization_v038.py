@@ -1,4 +1,4 @@
-"""Characterization tests for the pure legacy v0.38 modules.
+﻿"""Characterization tests for the pure legacy v0.38 modules.
 
 The desktop monolith is frozen, but these modules are still the reference for
 scheduling, task execution, governance and diagnostics behaviour. These tests pin the
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from data_studio_core_v0_38 import (
+from data_studio_core import (
     DeploymentHealth,
     calculate_deployment_health,
     infer_validation_rules,
@@ -25,15 +25,15 @@ from data_studio_core_v0_38 import (
     validate_frame,
     workspace_health,
 )
-from data_studio_diagnostics_v0_38 import DiagnosticLog
-from data_studio_jobs_v0_38 import (
+from data_studio_diagnostics import DiagnosticLog
+from data_studio_jobs import (
     dependency_status,
     execute_with_retry,
     next_schedule_time,
     parse_utc,
 )
-from data_studio_state_v0_38 import CURRENT_VERSION, migrate_project, validate_project
-from data_studio_tasks_v0_38 import TaskManager
+from data_studio_state import CURRENT_VERSION, migrate_project, validate_project
+from data_studio_tasks import TaskManager
 
 
 class TestProjectState:

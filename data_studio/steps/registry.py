@@ -54,6 +54,7 @@ class StepParam:
         allowed = {
             "any",
             "boolean",
+            "code",
             "column",
             "columns",
             "dataset",
@@ -77,7 +78,7 @@ class StepParam:
 
     def coerce(self, value: Any) -> Any:
         kind = self.kind
-        if kind in {"column", "string", "text", "dataset", "expression"}:
+        if kind in {"column", "string", "text", "dataset", "expression", "code"}:
             if not isinstance(value, str) or not value.strip():
                 raise StepError(f"Parameter {self.name!r} must be a non-empty string.")
             return value.strip()

@@ -1,3 +1,6 @@
+﻿import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import sys
 import traceback
 import json
@@ -6,11 +9,11 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path
-from data_studio_core_v0_38 import (calculate_deployment_health, promotion_readiness, infer_validation_rules, validate_frame, workspace_health, safe_math_eval, validate_dataframe_expression)
-from data_studio_state_v0_38 import migrate_project, validate_project
-from data_studio_diagnostics_v0_38 import DiagnosticLog
-from data_studio_jobs_v0_38 import execute_with_retry
-from data_studio_tasks_v0_38 import TaskManager
+from data_studio_core import (calculate_deployment_health, promotion_readiness, infer_validation_rules, validate_frame, workspace_health, safe_math_eval, validate_dataframe_expression)
+from data_studio_state import migrate_project, validate_project
+from data_studio_diagnostics import DiagnosticLog
+from data_studio_jobs import execute_with_retry
+from data_studio_tasks import TaskManager
 try:
   import pandas as pd
   import numpy as np
@@ -252,7 +255,7 @@ class Workbench(QMainWindow):
       title_box = QVBoxLayout()
       title = QLabel("Data Studio")
       title.setObjectName("appTitle")
-      subtitle = QLabel("Import → Clean → Analyze → Visualize → Model → Automate")
+      subtitle = QLabel("Import â†’ Clean â†’ Analyze â†’ Visualize â†’ Model â†’ Automate")
       subtitle.setObjectName("muted")
       title_box.addWidget(title)
       title_box.addWidget(subtitle)
@@ -445,14 +448,14 @@ class Workbench(QMainWindow):
   def export_cicd_bundle_dialog(self):
       folder=QFileDialog.getExistingDirectory(self,"Export CI/CD bundle")
       if not folder:return
-      out=Path(folder); (out/"github-actions-data-studio.yml").write_text("name: Data Studio CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        python: ['3.11', '3.12']\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with: {python-version: '${{ matrix.python }}'}\n      - run: pip install -r requirements_v0.38.txt\n      - run: python data_studio_ci_v0.38.py --project .\n",encoding="utf-8"); (out/"azure-pipelines-data-studio.yml").write_text("trigger:\n- main\npool:\n  vmImage: ubuntu-latest\nsteps:\n- task: UsePythonVersion@0\n  inputs: {versionSpec: '3.11'}\n- script: pip install -r requirements_v0.38.txt\n- script: python data_studio_ci_v0.38.py --project .\n",encoding="utf-8"); QMessageBox.information(self,"CI/CD export",f"Templates exported to {out}")
+      out=Path(folder); (out/"github-actions-data-studio.yml").write_text("name: Data Studio CI\non: [push, pull_request]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        python: ['3.11', '3.12']\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-python@v5\n        with: {python-version: '${{ matrix.python }}'}\n      - run: pip install -r requirements.txt\n      - run: python data_studio_ci.py --project .\n",encoding="utf-8"); (out/"azure-pipelines-data-studio.yml").write_text("trigger:\n- main\npool:\n  vmImage: ubuntu-latest\nsteps:\n- task: UsePythonVersion@0\n  inputs: {versionSpec: '3.11'}\n- script: pip install -r requirements.txt\n- script: python data_studio_ci.py --project .\n",encoding="utf-8"); QMessageBox.information(self,"CI/CD export",f"Templates exported to {out}")
   def show_release_gate(self):
       checks={"project_saved":bool(self.current_project_path),"contract_tests":self._latest_pass(self.contract_test_runs),"ci":self._latest_pass(self.cicd_runs),"datasets":bool(self.datasets),"pipelines":bool(self.pipeline_definitions)}; status="PASS" if all(checks.values()) else "FAIL"; record={"status":status,"checks":checks,"run_utc":pd.Timestamp.utcnow().isoformat()}; self.release_gate_runs.append(record)
       self.console.setPlainText("RELEASE GATE\n"+"="*80+"\n"+json.dumps(record,indent=2)); self.tabs.setCurrentWidget(self.python_page)
   def export_release_automation_dialog(self):
       folder=QFileDialog.getExistingDirectory(self,"Export release automation")
       if not folder:return
-      Path(folder,"release-data-studio.yml").write_text("name: Data Studio Release\non:\n  push:\n    tags: ['v*']\njobs:\n  package:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci_v0.38.py --project .\n      - uses: actions/upload-artifact@v4\n        with: {name: data-studio-release, path: .}\n",encoding="utf-8"); QMessageBox.information(self,"Release automation",f"Release workflow exported to {folder}")
+      Path(folder,"release-data-studio.yml").write_text("name: Data Studio Release\non:\n  push:\n    tags: ['v*']\njobs:\n  package:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci.py --project .\n      - uses: actions/upload-artifact@v4\n        with: {name: data-studio-release, path: .}\n",encoding="utf-8"); QMessageBox.information(self,"Release automation",f"Release workflow exported to {folder}")
   def show_environment_promotion(self):
       source,ok=QInputDialog.getItem(self,"Environment promotion","Source environment",["DEV","TEST"],0,False)
       if not ok:return
@@ -467,7 +470,7 @@ class Workbench(QMainWindow):
   def export_deployment_automation_dialog(self):
       folder=QFileDialog.getExistingDirectory(self,"Export deployment automation")
       if not folder:return
-      Path(folder,"deploy-data-studio.yml").write_text("name: Data Studio Deploy\non: workflow_dispatch\njobs:\n  deploy-test:\n    environment: TEST\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci_v0.38.py --project .\n  deploy-prod:\n    needs: deploy-test\n    environment: PROD\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'Deploy approved Data Studio release'\n",encoding="utf-8"); QMessageBox.information(self,"Deployment automation",f"Deployment workflow exported to {folder}")
+      Path(folder,"deploy-data-studio.yml").write_text("name: Data Studio Deploy\non: workflow_dispatch\njobs:\n  deploy-test:\n    environment: TEST\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: python data_studio_ci.py --project .\n  deploy-prod:\n    needs: deploy-test\n    environment: PROD\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo 'Deploy approved Data Studio release'\n",encoding="utf-8"); QMessageBox.information(self,"Deployment automation",f"Deployment workflow exported to {folder}")
   def record_deployment_observation(self):
       environment,ok=QInputDialog.getItem(self,"Deployment observation","Environment",["DEV","TEST","PROD"],1,False)
       if not ok:return
@@ -527,7 +530,7 @@ class Workbench(QMainWindow):
       fmt=definition.get("format","number")
       if fmt=="integer":return f"{value:,.0f}"
       if fmt=="percent":return f"{value:.1%}"
-      if fmt=="currency":return f"₹{value:,.2f}"
+      if fmt=="currency":return f"â‚¹{value:,.2f}"
       return f"{value:,.2f}" if isinstance(value,(int,float,np.number)) else str(value)
   def save_pipeline_definition(self):
       if not self.pipeline_steps: QMessageBox.information(self,"Save pipeline","No workflow steps are available yet."); return
@@ -706,7 +709,7 @@ class Workbench(QMainWindow):
       if not folder: return
       out = Path(folder) / f"data_studio_{job_id}"; out.mkdir(parents=True, exist_ok=True); job = self.scheduled_jobs[job_id]
       (out / "job.json").write_text(json.dumps(job, indent=2), encoding="utf-8")
-      runtime_source = Path(__file__).with_name("data_studio_headless_v0.38.py")
+      runtime_source = Path(__file__).with_name("data_studio_headless.py")
       if not runtime_source.exists():
           QMessageBox.critical(self, "Export runner", f"Headless runtime not found:\n{runtime_source}")
           return
@@ -721,7 +724,7 @@ base = Path(__file__).resolve().parent
 config = json.loads((base / "runner.json").read_text(encoding="utf-8"))
 command = [
   sys.executable,
-  str(base / "data_studio_headless_v0.38.py"),
+  str(base / "data_studio_headless.py"),
   "--project", config["project"],
   "--job-file", str(base / config["job_file"]),
   "--json-output", str(base / "last_run.json"),
@@ -1509,7 +1512,7 @@ def predict_batch(request: PredictionRequest):
           _,normal_p=stats.shapiro(resid.sample(min(len(resid),5000),random_state=42) if len(resid)>5000 else resid) if len(resid)>=3 else (np.nan,np.nan)
           rmse=float(np.sqrt(np.mean(resid**2))); mae=float(np.mean(np.abs(resid)))
           table=pd.DataFrame({x:clean[x],y:clean[y],"predicted":pred,"residual":resid}).head(200).round(5)
-          text=f"Linear regression diagnostics\nModel: {y} = {fit.intercept:.5f} + {fit.slope:.5f} × {x}\nN={len(clean)}\nR-squared={fit.rvalue**2:.5f}\nRMSE={rmse:.5f}\nMAE={mae:.5f}\nSlope p={fit.pvalue:.6g}\nResidual Shapiro-Wilk p={normal_p:.6g}\nInterpretation: {'slope is statistically significant' if fit.pvalue<.05 else 'slope is not statistically significant'} at alpha=.05. Residual normality {'shows evidence of departure' if normal_p<.05 else 'does not show significant departure'} by Shapiro-Wilk."
+          text=f"Linear regression diagnostics\nModel: {y} = {fit.intercept:.5f} + {fit.slope:.5f} Ã— {x}\nN={len(clean)}\nR-squared={fit.rvalue**2:.5f}\nRMSE={rmse:.5f}\nMAE={mae:.5f}\nSlope p={fit.pvalue:.6g}\nResidual Shapiro-Wilk p={normal_p:.6g}\nInterpretation: {'slope is statistically significant' if fit.pvalue<.05 else 'slope is not statistically significant'} at alpha=.05. Residual normality {'shows evidence of departure' if normal_p<.05 else 'does not show significant departure'} by Shapiro-Wilk."
           self.store_statistics_result("Regression diagnostics",text,table)
       except Exception as exc: QMessageBox.critical(self,"Regression diagnostics failed",str(exc))
   def statistics_report(self):
@@ -2148,7 +2151,7 @@ def predict_batch(request: PredictionRequest):
                       if ratio>=.5:
                           card="one-to-one" if av.is_unique and bv.is_unique else "one-to-many" if av.is_unique else "many-to-one" if bv.is_unique else "many-to-many candidate"
                           suggestions.append({"from_dataset":a,"from_column":str(ca),"to_dataset":b,"to_column":str(cb),"cardinality":card,"overlap":round(ratio,3)})
-      text="No likely relationships found." if not suggestions else "\n".join(f"{x['from_dataset']}.{x['from_column']} → {x['to_dataset']}.{x['to_column']} | {x['cardinality']} | overlap {x['overlap']:.0%}" for x in suggestions)
+      text="No likely relationships found." if not suggestions else "\n".join(f"{x['from_dataset']}.{x['from_column']} â†’ {x['to_dataset']}.{x['to_column']} | {x['cardinality']} | overlap {x['overlap']:.0%}" for x in suggestions)
       self.console.setPlainText(text); self.tabs.setCurrentWidget(self.python_page)
       if suggestions:
           answer=QMessageBox.question(self,"Suggested relationships",f"Found {len(suggestions)} candidate relationships. Add valid one-to-one/one-to-many/many-to-one suggestions?")
@@ -2197,11 +2200,11 @@ def predict_batch(request: PredictionRequest):
       definition=next(m for m in valid if m["name"]==name); value=self.calculate_semantic_measure(definition); QMessageBox.information(self,"Measure result",f"{name}\n\n{value:,.4f}" if isinstance(value,(int,float,np.number)) else f"{name}\n\n{value}")
   def model_overview(self):
       lines=["SEMANTIC DATA MODEL","="*60,"","DATASETS"]
-      for n,df in self.datasets.items(): lines.append(f"• {n}: {len(df):,} rows × {len(df.columns)} columns")
+      for n,df in self.datasets.items(): lines.append(f"â€¢ {n}: {len(df):,} rows Ã— {len(df.columns)} columns")
       lines.extend(["","RELATIONSHIPS"])
-      lines.extend([f"• {r['from_dataset']}.{r['from_column']} → {r['to_dataset']}.{r['to_column']} ({r['cardinality']})" for r in self.relationships] or ["• None defined"])
-      lines.extend(["","CALCULATED COLUMNS"]); lines.extend([f"• {x['dataset']}.{x['name']} = {x['expression']}" for x in self.calculated_columns] or ["• None defined"])
-      lines.extend(["","MEASURES"]); lines.extend([f"• {m['name']}: {m['aggregation'].upper()}({m['dataset']}.{m['column']})" + (f" where {m['filter_column']} = {m['filter_value']}" if m.get('filter_column') else "") for m in self.semantic_measures] or ["• None defined"])
+      lines.extend([f"â€¢ {r['from_dataset']}.{r['from_column']} â†’ {r['to_dataset']}.{r['to_column']} ({r['cardinality']})" for r in self.relationships] or ["â€¢ None defined"])
+      lines.extend(["","CALCULATED COLUMNS"]); lines.extend([f"â€¢ {x['dataset']}.{x['name']} = {x['expression']}" for x in self.calculated_columns] or ["â€¢ None defined"])
+      lines.extend(["","MEASURES"]); lines.extend([f"â€¢ {m['name']}: {m['aggregation'].upper()}({m['dataset']}.{m['column']})" + (f" where {m['filter_column']} = {m['filter_value']}" if m.get('filter_column') else "") for m in self.semantic_measures] or ["â€¢ None defined"])
       self.console.setPlainText("\n".join(lines)); self.tabs.setCurrentWidget(self.python_page)
   def change_engine(self, name):
       self.compute_engine = name
@@ -2299,7 +2302,7 @@ def predict_batch(request: PredictionRequest):
               safe=re.sub(r"[^A-Za-z0-9_]","_",name); con.register(safe,df)
           query=self.sql_editor.toPlainText().strip()
           self.last_sql_result=con.execute(query).fetchdf(); self.sql_result_model.set_dataframe(self.last_sql_result)
-          self.sql_status.setText(f"Query complete: {len(self.last_sql_result):,} rows × {len(self.last_sql_result.columns)} columns")
+          self.sql_status.setText(f"Query complete: {len(self.last_sql_result):,} rows Ã— {len(self.last_sql_result.columns)} columns")
           self.workflow.addItem(f"{self.workflow.count()+1}. Run DuckDB SQL")
       except Exception as exc: self.sql_status.setText(f"SQL error: {exc}")
   def save_sql_result(self):
@@ -2461,7 +2464,7 @@ def predict_batch(request: PredictionRequest):
       dialog=QDialog(self); dialog.setWindowTitle("Getting Started"); dialog.resize(620,470); root=QVBoxLayout(dialog)
       title=QLabel("Start with your goal"); title.setObjectName("pageTitle"); root.addWidget(title)
       intro=QLabel("Choose a path. SQL, Spark and Python remain under Advanced."); intro.setWordWrap(True); intro.setObjectName("muted"); root.addWidget(intro)
-      journeys=[("Analyze a file","Import → profile → clean → chart",self.import_data),("Build a dashboard","Create KPIs and visuals",lambda:self.select_tool("New dashboard")),("Automate cleaning","Create a reusable pipeline",lambda:self.select_tool("New pipeline")),("Build a model","AutoML → compare → register",lambda:self.select_tool("New AutoML experiment")),("Use Python","Open active data as df",lambda:self.tabs.setCurrentWidget(self.python_page))]
+      journeys=[("Analyze a file","Import â†’ profile â†’ clean â†’ chart",self.import_data),("Build a dashboard","Create KPIs and visuals",lambda:self.select_tool("New dashboard")),("Automate cleaning","Create a reusable pipeline",lambda:self.select_tool("New pipeline")),("Build a model","AutoML â†’ compare â†’ register",lambda:self.select_tool("New AutoML experiment")),("Use Python","Open active data as df",lambda:self.tabs.setCurrentWidget(self.python_page))]
       for label,desc,fn in journeys:
           row=QFrame(); row.setObjectName("toolCard"); layout=QHBoxLayout(row); text=QVBoxLayout(); a=QLabel(label); a.setObjectName("toolTitle"); b=QLabel(desc); b.setObjectName("muted"); text.addWidget(a); text.addWidget(b); button=QPushButton("Start"); button.clicked.connect(lambda checked=False,f=fn,d=dialog:(d.accept(),f())); layout.addLayout(text,1); layout.addWidget(button); root.addWidget(row)
       close=QDialogButtonBox(QDialogButtonBox.Close); close.rejected.connect(dialog.reject); root.addWidget(close); dialog.exec()
@@ -2472,7 +2475,7 @@ def predict_batch(request: PredictionRequest):
           listing.clear(); q=text.strip().lower(); ordered=sorted(actions,key=lambda x:(x[0] not in favorites,x[0]))
           for label,fn in ordered:
               if not q or q in label.lower():
-                  item=QListWidgetItem(("★ " if label in favorites else "")+label); item.setData(Qt.UserRole,label); listing.addItem(item)
+                  item=QListWidgetItem(("â˜… " if label in favorites else "")+label); item.setData(Qt.UserRole,label); listing.addItem(item)
       def run():
           item=listing.currentItem()
           if not item:return
@@ -2986,7 +2989,7 @@ def predict_batch(request: PredictionRequest):
       self.dataset_list.blockSignals(True)
       self.dataset_list.clear()
       for name, df in self.datasets.items():
-          item = QListWidgetItem(f"{name}  ({len(df):,} × {len(df.columns)})")
+          item = QListWidgetItem(f"{name}  ({len(df):,} Ã— {len(df.columns)})")
           item.setData(Qt.UserRole, name)
           self.dataset_list.addItem(item)
           if name == target: self.dataset_list.setCurrentItem(item)
@@ -3180,11 +3183,11 @@ def predict_batch(request: PredictionRequest):
       cells = max(1, df.size)
       score = int(100 * (1 - missing / cells))
       self.dataset_name.setText(self.active_dataset)
-      self.dataset_size.setText(f"{len(df):,} rows × {len(df.columns)} columns")
+      self.dataset_size.setText(f"{len(df):,} rows Ã— {len(df.columns)} columns")
       if self.active_dataset in self.datasets:
           self.datasets[self.active_dataset] = df.copy()
       self.quality.setValue(score)
-      self.quality_note.setText(f"{missing} missing cells · {df.duplicated().sum()} duplicate rows")
+      self.quality_note.setText(f"{missing} missing cells Â· {df.duplicated().sum()} duplicate rows")
       self.refresh_chart_columns()
       if hasattr(self, "dashboard_summary"): self.refresh_dashboard()
       self.update_engine_badge()

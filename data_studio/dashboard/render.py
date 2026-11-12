@@ -8,7 +8,7 @@ the API, the workspace UI and the HTML report all share.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -87,6 +87,7 @@ class DashboardView:
     filters: tuple[QueryFilter, ...]
     model: str
     generated_at: str = ""
+    parameters: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,7 +96,79 @@ class DashboardView:
             "filters": [item.to_dict() for item in self.filters],
             "tiles": [tile.to_dict() for tile in self.tiles],
             "generated_at": self.generated_at,
+            "parameters": dict(self.parameters),
         }
+
+
+def _substitute_ref(value: Any, parameters: Mapping[str, Any]) -> Any:
+    if isinstance(value, str) and value.startswith("@"):
+        name = value[1:]
+        if name not in parameters:
+            raise DashboardError(
+                f"Unknown parameter @{name}; the dashboard does not declare it."
+            )
+        return parameters[name]
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return tuple(_substitute_ref(item, parameters) for item in value)
+    return value
+
+
+def _substitute_filter(item: QueryFilter, parameters: Mapping[str, Any]) -> QueryFilter:
+    value = _substitute_ref(item.value, parameters)
+    if value is item.value:
+        return item
+    return QueryFilter(item.field, item.operator, value)
+
+
+def resolve_parameters(
+    dashboard: Dashboard, values: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    """Coerce incoming parameter values; unknown names are rejected."""
+
+    if values is None:
+        values = {}
+    if not isinstance(values, Mapping):
+        raise DashboardError("Dashboard parameters must be an object.")
+    declared = {item.name: item for item in dashboard.parameters}
+    unknown = sorted(set(values) - set(declared))
+    if unknown:
+        raise DashboardError(
+            "Unknown parameter(s): " + ", ".join(unknown)
+            + "; the dashboard declares: "
+            + (", ".join(sorted(declared)) or "none")
+            + "."
+        )
+    resolved: dict[str, Any] = {}
+    for name, parameter in declared.items():
+        resolved[name] = parameter.coerce(values.get(name))
+    return resolved
+
+
+def _substitute_tile(
+    tile: DashboardTile, parameters: Mapping[str, Any]
+) -> DashboardTile:
+    changed = False
+    filters = tuple(
+        _substitute_filter(item, parameters) for item in tile.filters
+    )
+    if filters != tile.filters:
+        changed = True
+    limit: int | str | None = tile.limit
+    if isinstance(limit, str) and limit.startswith("@"):
+        name = limit[1:]
+        if name not in parameters:
+            raise DashboardError(f"Tile {tile.id!r} references unknown parameter @{name}.")
+        number = parameters[name]
+        try:
+            limit = max(1, int(float(number)))
+        except (TypeError, ValueError) as exc:
+            raise DashboardError(
+                f"Tile {tile.id!r} parameter @{name} must be a number, got {number!r}."
+            ) from exc
+        changed = True
+    if not changed:
+        return tile
+    return replace(tile, filters=filters, limit=limit)
 
 
 def _selections(
@@ -302,12 +375,14 @@ class DashboardRenderer:
         selections: Mapping[str, Sequence[Any] | Any] | None = None,
         filters: Sequence[QueryFilter | Mapping[str, Any]] | None = None,
         drill: Mapping[str, Any] | None = None,
+        parameters: Mapping[str, Any] | None = None,
         theme: str = "light",
         width: int = DEFAULT_WIDTH,
         height: int = DEFAULT_HEIGHT,
     ) -> DashboardView:
         if not isinstance(dashboard, Dashboard):
             raise TypeError("render expects a Dashboard.")
+        resolved_parameters = resolve_parameters(dashboard, parameters)
         slicer_filters = _selections(dashboard, selections)
         cross_filters = _cross_filters(filters)
         applied = slicer_filters + cross_filters
@@ -316,7 +391,7 @@ class DashboardRenderer:
         for tile in dashboard.tiles:
             views.append(
                 self._render_tile(
-                    tile,
+                    _substitute_tile(tile, resolved_parameters),
                     applied,
                     states.get(tile.id),
                     theme=theme,
@@ -330,6 +405,7 @@ class DashboardRenderer:
             filters=applied,
             model=self.engine.model.name,
             generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            parameters=resolved_parameters,
         )
 
     def _render_tile(
@@ -386,4 +462,5 @@ __all__ = [
     "DashboardRenderer",
     "DashboardTileView",
     "DashboardView",
+    "resolve_parameters",
 ]

@@ -178,6 +178,12 @@ def render_dashboard_html(
         for item in view.filters
     )
     slicer_html = f'<div class="slicers">{slicers}</div>' if slicers else ""
+    if view.parameters:
+        parameter_html = "".join(
+            f'<span class="slicer">{_text(name)} = {_text(value)}</span>'
+            for name, value in view.parameters.items()
+        )
+        slicer_html += f'<div class="slicers">{parameter_html}</div>'
     description = (
         f'<p class="sub">{_text(dashboard.description)}</p>'
         if dashboard.description

@@ -4,23 +4,20 @@ A local-first analytics workbench for cleaning, joining, analyzing, visualizing 
 tabular data. The long-term goal is one platform for the work people currently split across Excel,
 R, SAS, Tableau and Power BI.
 
-**Current status:** Phase 0 (foundation), Phase 1 (kernel MVP), Phase 2A (typed
-descriptive analytics), Phase 2B (inference and regression), Phase 2C (time series,
-chart rendering and HTML reports), Phase 2D (saved analyses, fingerprint
-invalidation, scheduled refresh and report artifacts), Phase 3A (semantic model,
-safe measure DSL, live dashboards with slicers and dashboard HTML export) and Phase 3B
-(tile sorting and top-N, table data bars/heatmaps, saved views and print/PNG export) are
-implemented. The new package can
-import CSV/Excel/JSON/Parquet/DuckDB files, run an ordered, validated pipeline with
-incremental reruns and undo, profile and summarise the result, run hypothesis tests,
-regressions, time-series decompositions and ARIMA forecasts through the same typed analysis
-registry, render charts as dependency-free SVG, export self-contained HTML reports, persist
-results with freshness tracking, derive a star-schema semantic model, compose live dashboards
-from typed dimensions and measures, and reopen a project reproducibly. The browser workspace
-has a light/dark theme, a grouped and searchable analysis catalog, contextual help, a
-Saved view for freshness, schedules and report downloads, and a Dashboards view with
-shared slicers, saved bookmark views and one-click HTML export. v0.38 remains a frozen desktop
-prototype kept runnable as a reference. See
+**Start here - the simple desktop app.** Data Studio now ships a small, friendly desktop app:
+open a file, tidy it, chart it and save it. No jargon, no clutter - just five screens
+(Home, My table, Clean, Charts, Save & share) with undo and a built-in help guide.
+
+```powershell
+.\run_data_studio.bat        # or: python -m data_studio.ui   (after pip install -r requirements.txt)
+```
+
+See [`USER_GUIDE.md`](USER_GUIDE.md) for the two-minute tour.
+
+**Underneath** is the full analytics engine: kernel contracts, project format, CLI and API - phases 0-4
+(typed analyses, time series, semantic dashboards, time intelligence, what-if parameters,
+drill-down cross-filtering, Excel-like formula bar, pivots, code steps, reproducible script export). The v0.38 all-features prototype is
+frozen in [`legacy/`](legacy/README.md) and kept runnable as a reference. See
 [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) for the review, gap analysis and phased plan.
 
 ## Documentation
@@ -30,14 +27,16 @@ prototype kept runnable as a reference. See
 | [`REVIEW_AND_ROADMAP.md`](REVIEW_AND_ROADMAP.md) | Measured review of v0.38, gap analysis, target architecture and phased plan. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | Architecture decision records: why the web app, kernel, engines and project format. |
 | [`docs/PROJECT_FORMAT.md`](docs/PROJECT_FORMAT.md) | The versioned folder project format, paths, checksums and integrity rules. |
-| [`USER_GUIDE_v0.38.md`](USER_GUIDE_v0.38.md) | Guide to the frozen desktop prototype. |
+| [`USER_GUIDE.md`](USER_GUIDE.md) | Two-minute tour of the simple desktop app. |
+| [`legacy/USER_GUIDE_v0.38.md`](legacy/USER_GUIDE_v0.38.md) | Guide to the frozen all-features prototype. |
 
-## The two codebases
+## The pieces
 
 | Path | Purpose |
 |---|---|
-| `data_studio_v0.38.py` + `data_studio_*_v0_38.py` | The legacy desktop prototype. Kept runnable as a reference. Do not add features. |
-| `data_studio/` | The new package: kernel contracts, project format, API, CLI. |
+| `data_studio/ui/` | The simple desktop app (`python -m data_studio.ui`). |
+| `data_studio/` | The analytics package: kernel, project format, API, CLI. |
+| `legacy/` | The frozen v0.38 all-features prototype. Reference only - do not add features. |
 
 ## Setup
 
@@ -158,8 +157,9 @@ data-studio remove-saved .\examples\demo monthly-revenue
 
 Schedules are `manual`, `on_open`, `hourly` and `daily`. They are evaluated when a project
 opens, by the workspace's minute timer while the tab is visible, and by
-`data-studio refresh --due`; there is no background daemon. Use `--due` from Windows Task
-Scheduler or cron for unattended refresh. The API mirrors the CLI:
+`data-studio refresh --due` — which also refreshes due **dashboards** — so there is no
+background daemon. Use `--due` from Windows Task Scheduler or cron for unattended refresh.
+The API mirrors the CLI:
 
 | Method | Endpoint | Purpose |
 |---|---|---|
@@ -230,6 +230,50 @@ and dashboards store named saved views (`bookmarks`) that restore slicer selecti
 workspace prints the canvas through the browser print dialog (save as PDF) and exports each
 chart as a PNG; the HTML report carries the same conditional formatting and print styles.
 
+Phase 3C completes the analytical core:
+
+- **Calendar (date) table.** `data-studio date-table .\examples\demo --start 2020-01-01
+  --end 2030-12-31 --rederive` generates a one-row-per-day calendar dataset (date, year,
+  quarter, month, month_name, year_month, week, weekday, month/quarter/year/week starts)
+  and, with `--rederive`, replaces the model so those columns become grain-tagged
+  dimensions and a `Calendar` hierarchy (`year → quarter → month → day`). Deriving a
+  model from an existing calendar marks grains automatically.
+- **Time-intelligence measures.** Measures may wrap one aggregate: `running_total(sum(amount))`
+  (cumulative sum ordered by the grain axis), `yoy(sum(amount))` (change vs the same period
+  in the prior year) and `yoy_pct(sum(amount))` (percentage change). They are ordered by the
+  date dimension in the query that carries a `grain` (`year`/`quarter`/`month`/`week`/`day`);
+  without one the engine explains exactly what to do. Grain is set per dimension — the
+  workspace model panel has a grain dropdown per date dimension, or set `grain` in
+  `models/semantic.json`.
+- **Drill-down and cross-highlighting.** Hierarchy tiles show breadcrumbs and drill on click
+  (year → quarter → month → day). Clicking a mark on a chart, or the value in a table row,
+  cross-filters every tile on the dashboard; the active filters appear as removable chips.
+- **Tile tooltips.** Every tile has a **SQL** button that shows its dimensions, measures,
+  elapsed time and the exact compiled SQL behind it.
+
+Phase 3D makes dashboards operational:
+
+- **What-if parameters.** Dashboards declare typed parameters (`number`, `text`, `choice`,
+  `boolean`) with defaults and bounds. Tiles reference them as `@name` in filter values or
+  the row cap (`limit`); viewers change them in the workspace parameter bar and every tile
+  re-queries live. Bookmarks capture slicers; filters and parameters travel with the render.
+- **Scheduled refresh.** Dashboards carry `schedule` (`manual`/`on_open`/`hourly`/`daily`),
+  `refreshed_at` and an input fingerprint (model + dataset checksums + pipeline + app
+  version). `data-studio refresh --due`, the workspace minute timer and project open all
+  refresh due dashboards alongside saved analyses; the workspace shows fresh/stale pills,
+  a schedule selector and **Refresh now**. With `report_path` set
+  (`data-studio dashboard-save ... --report`), each refresh rewrites
+  `reports/dashboard-<id>.html`.
+
+```powershell
+data-studio dashboard-save .\examples\demo --title "YoY overview" `
+  --tiles '[{"id":"running","title":"Running total","kind":"chart","chart":"line",
+            "dimensions":["month"],"measures":["running_total"],"order_by":[{"field":"month","direction":"asc"}]},
+            {"id":"yoy","title":"YoY %","kind":"chart","dimensions":["month"],"measures":["yoy_pct"]}]' `
+  --parameters '[{"name":"min_total","type":"number","default":0,"minimum":0}]' `
+  --schedule daily --report
+```
+
 The same operations are available over HTTP:
 
 | Method | Endpoint | Purpose |
@@ -237,22 +281,66 @@ The same operations are available over HTTP:
 | `GET` | `/api/v1/model` | Read the model, validation problems and available datasets. |
 | `PUT` | `/api/v1/model` | Validate and replace the model. |
 | `POST` | `/api/v1/model/derive` | Derive a starter model from recorded schemas. |
+| `POST` | `/api/v1/model/date-table` | Generate a calendar (date) dataset for time intelligence. |
 | `DELETE` | `/api/v1/model` | Remove the model. |
 | `POST` | `/api/v1/model/query` | Run a typed dimension/measure query. |
 | `GET` | `/api/v1/model/dimensions/{name}/values` | List slicer values with search. |
 | `GET` / `POST` | `/api/v1/dashboards` | List or create dashboards. |
 | `GET` / `PUT` / `DELETE` | `/api/v1/dashboards/{id}` | Read, replace or delete one dashboard. |
 | `POST` | `/api/v1/dashboards/{id}/render` | Render tiles with slicer selections. |
+| `POST` | `/api/v1/dashboards/refresh` | Refresh one dashboard with `{"id":…}`, `{"due": true}` or all. |
 | `POST` | `/api/v1/dashboards/{id}/bookmarks` | Save a named slicer selection set. |
 | `DELETE` | `/api/v1/dashboards/{id}/bookmarks/{bookmark_id}` | Delete a saved view. |
 | `GET` / `POST` | `/api/v1/dashboards/{id}/report` | Download HTML, or write it under `reports/`. |
 
+## Excel-like editing and scripting (Phase 4)
+
+Phase 4 closes the gap with a routine spreadsheet workflow — all inside the workspace
+(`data-studio serve`), the CLI or the desktop app, never on your original file.
+
+- **Formula bar.** In Prepare, `fx` takes a typed expression (`amount * 1.2`,
+  `upper(region)`, `round(amount / sum(amount), 4)`) and adds it as a `derive` step with
+  live syntax checks. Targets: replace a column or create a new one. Quick actions:
+  fill down (forward-fill missing), find &amp; replace, rename, cast, drop, copy preview
+  as TSV.
+- **Pivot.** A Pivot view builds row/column cross-tabs with one or more values, each
+  with its own aggregation (sum, average, count, distinct count, min, max, median,
+  stddev). Copy as TSV or push a single-value pivot into the pipeline as a `pivot` step.
+- **Grid comforts.** Freeze panes (sticky header and first column) in every table;
+  conditional formatting per column — **data bars**, **heatmap** and **highlight** with
+  six comparison operators and red/amber/green/blue — persisted per dataset in the
+  project (`formats/<dataset>.json`) and applied everywhere the grid renders. In the
+  desktop app, **validation lists** restrict a column to an allowed set (dropdown
+  editing; out-of-list values are rejected).
+- **True escape hatch.** A **Python / R code step** runs trusted local scripts on the
+  data as it flows through the pipeline. The script gets the input table as Parquet in
+  `DATA_STUDIO_INPUT_PARQUET` and writes one Parquet table to
+  `DATA_STUDIO_OUTPUT_PARQUET`; timeouts, failure output and exit codes are reported
+  with the pipeline error. Python code runs inline on the desktop; R requires
+  `Rscript` on the PATH.
+- **Script export.** Freeze the current pipeline as a standalone script:
+  `data-studio script .\examples\demo --format python --output exports\pipeline_export.py`.
+  Every SQL step becomes DuckDB SQL; code steps are inlined and re-executed; dataset
+  paths are relative to the project root. The Python script needs only `duckdb` and
+  `pandas`; the R variant needs `duckdb`/`DBI`. `--format r` requires all code steps to
+  be R.
+
+From the API:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/api/v1/formula/check` | Type-check an expression; returns the inferred type and a sample. |
+| `POST` | `/api/v1/pivot` | Conditional-aggregate pivot (rows, one pivot column, values). |
+| `POST` | `/api/v1/script` | Generate a reproducible Python or R script for the pipeline. |
+| `GET` / `PUT` | `/api/v1/datasets/{id}/format` | Read or replace conditional-formatting rules. |
+
 ## Run the legacy prototype
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install PySide6 matplotlib scipy scikit-learn openpyxl
-.\.venv\Scripts\python.exe data_studio_v0.38.py
+.\legacy\run_data_studio.bat
 ```
+
+(See [`legacy/README.md`](legacy/README.md). Reference only.)
 
 ## Test
 

@@ -17,6 +17,7 @@ from ..analysis import DEFAULT_ANALYSIS_REGISTRY, AnalysisContext
 from ..analysis.saved import SCHEDULES, SavedAnalysisStore
 from ..dashboard import (
     DashboardBookmark,
+    DashboardParameter,
     DashboardRenderer,
     DashboardSlicer,
     DashboardStore,
@@ -37,13 +38,16 @@ from ..project.manifest import (
 )
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
+from ..script import SCRIPT_FORMATS, generate_script
 from ..semantic import (
+    CalendarError,
     QueryFilter,
     QueryOrder,
     SemanticEngine,
     SemanticModel,
     SemanticModelStore,
     SemanticQuery,
+    generate_calendar,
 )
 from ..version import __version__
 
@@ -535,6 +539,32 @@ def _cmd_report(args: argparse.Namespace) -> int:
         return _fail(exc)
 
 
+def _cmd_script(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            script = generate_script(project, fmt=args.format)
+            if args.output:
+                path = Path(args.output)
+                if not path.is_absolute():
+                    path = safe_project_path(
+                        project.root, args.output.replace("\\", "/")
+                    )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(script, encoding="utf-8", newline="\n")
+                if args.json:
+                    _print_json({"destination": str(path), "format": args.format})
+                else:
+                    print(f"Wrote {args.format} script to {path}")
+                return 0
+            if args.json:
+                _print_json({"script": script, "format": args.format})
+            else:
+                print(script)
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
 def _saved_text_row(item: dict[str, Any]) -> str:
     schedule = item.get("schedule") or "manual"
     status = item.get("status") or "unknown"
@@ -648,16 +678,37 @@ def _cmd_refresh(args: argparse.Namespace) -> int:
                 refreshed, failures = store.refresh_all()
             else:
                 refreshed, failures = store.refresh_due()
+            # Dashboards share the schedule vocabulary: refresh them alongside
+            # saved analyses. Passing a saved analysis id scopes this command to
+            # that analysis only.
+            dashboards: list[Any] = []
+            dashboard_failures: list[dict[str, str]] = []
+            dash_store = DashboardStore(project)
+            if args.dashboard_id:
+                dashboards = [dash_store.refresh(args.dashboard_id)]
+            elif not args.saved_id:
+                if args.all:
+                    dashboards, dashboard_failures = dash_store.refresh_all()
+                else:
+                    dashboards, dashboard_failures = dash_store.refresh_due()
+            failures = list(failures) + list(dashboard_failures)
             if args.json:
                 _print_json(
                     {
                         "refreshed": [store.describe(item) for item in refreshed],
                         "failed": failures,
+                        "dashboards": [
+                            dash_store.describe(item) for item in dashboards
+                        ],
+                        "dashboard_failures": dashboard_failures,
                     }
                 )
             else:
                 print(f"Refreshed {len(refreshed)} saved analysis(es).")
                 for item in refreshed:
+                    print(f"  {item.id:<28} {item.refreshed_at}  {item.title}")
+                print(f"Refreshed {len(dashboards)} dashboard(s).")
+                for item in dashboards:
                     print(f"  {item.id:<28} {item.refreshed_at}  {item.title}")
                 for failure in failures:
                     print(
@@ -784,6 +835,44 @@ def _cmd_model_remove(args: argparse.Namespace) -> int:
         return _fail(exc)
 
 
+def _cmd_date_table(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            try:
+                entry = generate_calendar(
+                    project,
+                    start=args.start,
+                    end=args.end,
+                    dataset_id=args.dataset,
+                    overwrite=args.overwrite,
+                )
+            except CalendarError as exc:
+                raise ValueError(str(exc)) from exc
+            payload: dict[str, Any] = {
+                "dataset": entry.id,
+                "rows": entry.rows,
+                "checksum_sha256": entry.checksum_sha256,
+            }
+            if args.rederive:
+                store = SemanticModelStore(project)
+                model = store.derive(name=f"{project.name} model")
+                payload["model"] = store.to_dict(model)
+            if args.json:
+                _print_json(payload)
+            else:
+                print(
+                    f"Calendar dataset {entry.id!r} stored "
+                    f"({entry.rows} rows, {args.start}..{args.end})."
+                )
+                print(
+                    "Re-derive the semantic model to expose its year/quarter/month/"
+                    "week/day dimensions (data-studio model-derive)."
+                )
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
 def _parse_order(value: str) -> QueryOrder:
     parts = value.replace(":", " ").split()
     if not parts:
@@ -876,6 +965,21 @@ def _cmd_dashboard_show(args: argparse.Namespace) -> int:
             if dashboard.description:
                 print(f"  {dashboard.description}")
             print(f"  updated {dashboard.updated_at or 'never'}")
+            print(f"  schedule {dashboard.schedule}")
+            if dashboard.refreshed_at:
+                print(f"  refreshed {dashboard.refreshed_at}")
+            if dashboard.parameters:
+                print("  parameters")
+                for parameter in dashboard.parameters:
+                    options = (
+                        f" options={','.join(str(item) for item in parameter.options)}"
+                        if parameter.options
+                        else ""
+                    )
+                    print(
+                        f"    {parameter.name:<20} {parameter.type:<7} "
+                        f"default={parameter.default}{options}"
+                    )
             if dashboard.slicers:
                 print("  slicers")
                 for slicer in dashboard.slicers:
@@ -915,12 +1019,18 @@ def _cmd_dashboard_save(args: argparse.Namespace) -> int:
             raise ValueError("--slicers must be a JSON list.")
         if bookmarks_raw is not None and not isinstance(bookmarks_raw, list):
             raise ValueError("--bookmarks must be a JSON list.")
+        parameters_raw = _read_json(args.parameters) if args.parameters else None
+        if parameters_raw is not None and not isinstance(parameters_raw, list):
+            raise ValueError("--parameters must be a JSON list.")
         tiles = tuple(DashboardTile.from_dict(item) for item in tiles_raw)
         slicers = tuple(
             DashboardSlicer.from_dict(item) for item in slicers_raw
         )
         bookmarks = tuple(
             DashboardBookmark.from_dict(item) for item in (bookmarks_raw or [])
+        )
+        parameters = tuple(
+            DashboardParameter.from_dict(item) for item in (parameters_raw or [])
         )
         with _open(args) as project:
             model = SemanticModelStore(project).load()
@@ -935,9 +1045,12 @@ def _cmd_dashboard_save(args: argparse.Namespace) -> int:
                 tiles=tiles,
                 slicers=slicers,
                 bookmarks=bookmarks,
+                parameters=parameters,
                 dashboard_id=args.dashboard_id,
                 model=model,
                 overwrite=args.overwrite,
+                schedule=args.schedule,
+                report_path=True if args.report else None,
             )
             if args.json:
                 _print_json(dashboard.to_dict())
@@ -946,6 +1059,8 @@ def _cmd_dashboard_save(args: argparse.Namespace) -> int:
             print(f"  tiles    {len(dashboard.tiles)}")
             print(f"  slicers  {len(dashboard.slicers)}")
             print(f"  views    {len(dashboard.bookmarks)}")
+            print(f"  params   {len(dashboard.parameters)}")
+            print(f"  schedule {dashboard.schedule}")
         return 0
     except _ERRORS as exc:
         return _fail(exc)
@@ -985,10 +1100,22 @@ def _parse_dashboard_filters(values: list[str] | None) -> list[QueryFilter]:
     return filters
 
 
+def _parse_parameters(values: list[str] | None) -> dict[str, Any]:
+    parameters: dict[str, Any] = {}
+    for item in values or []:
+        name, _, raw = item.partition("=")
+        name = name.strip().lstrip("@").strip()
+        if not name:
+            raise ValueError("--param needs NAME=VALUE.")
+        parameters[name] = _coerce(raw.strip())
+    return parameters
+
+
 def _cmd_dashboard_render(args: argparse.Namespace) -> int:
     try:
         selections = dict(_parse_selection(item) for item in (args.select or []))
         cross_filters = _parse_dashboard_filters(args.filter)
+        parameters = _parse_parameters(args.param)
         with _open(args) as project:
             model = SemanticModelStore(project).get()
             dashboard = DashboardStore(project).get(args.dashboard_id)
@@ -998,6 +1125,7 @@ def _cmd_dashboard_render(args: argparse.Namespace) -> int:
                 dashboard,
                 selections=selections,
                 filters=cross_filters,
+                parameters=parameters,
                 theme=args.theme,
             )
             if args.json:
@@ -1041,6 +1169,7 @@ def _cmd_dashboard_report(args: argparse.Namespace) -> int:
     try:
         selections = dict(_parse_selection(item) for item in (args.select or []))
         cross_filters = _parse_dashboard_filters(args.filter)
+        parameters = _parse_parameters(args.param)
         with _open(args) as project:
             model = SemanticModelStore(project).get()
             dashboard = DashboardStore(project).get(args.dashboard_id)
@@ -1050,6 +1179,7 @@ def _cmd_dashboard_report(args: argparse.Namespace) -> int:
                 dashboard,
                 selections=selections,
                 filters=cross_filters,
+                parameters=parameters,
                 theme=args.theme,
             )
             destination = args.destination or f"reports/dashboard-{dashboard.id}.html"
@@ -1252,6 +1382,27 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--json", action="store_true", help="Emit JSON.")
     report.set_defaults(handler=_cmd_report)
 
+    script = subparsers.add_parser(
+        "script",
+        help=(
+            "Generate a reproducible Python or R script for the project's "
+            "pipeline (runs anywhere; only duckdb and pandas needed)."
+        ),
+    )
+    script.add_argument("project", help="Project directory.")
+    script.add_argument(
+        "--format",
+        choices=SCRIPT_FORMATS,
+        default="python",
+        help="Script language (default: python).",
+    )
+    script.add_argument(
+        "--output",
+        help="Write the script to this path (default: print to stdout).",
+    )
+    script.add_argument("--json", action="store_true", help="Emit JSON.")
+    script.set_defaults(handler=_cmd_script)
+
     save_analysis = subparsers.add_parser(
         "save-analysis",
         help="Run an analysis and persist it under analyses/ for refresh and reuse.",
@@ -1301,19 +1452,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = subparsers.add_parser(
         "refresh",
-        help="Refresh due (or all) saved analyses; suitable for Task Scheduler/cron.",
+        help=(
+            "Refresh due (or all) saved analyses and dashboards; "
+            "suitable for Task Scheduler/cron."
+        ),
     )
     refresh.add_argument("project", help="Project directory.")
     refresh.add_argument("saved_id", nargs="?", help="Refresh only this saved analysis.")
     refresh.add_argument(
+        "--dashboard-id",
+        help="Refresh only this dashboard (instead of all due dashboards).",
+    )
+    refresh.add_argument(
         "--due",
         action="store_true",
-        help="Refresh only analyses whose schedule is due (default).",
+        help="Refresh only items whose schedule is due (default).",
     )
     refresh.add_argument(
         "--all",
         action="store_true",
-        help="Refresh every saved analysis regardless of schedule.",
+        help="Refresh every saved analysis and dashboard regardless of schedule.",
     )
     refresh.add_argument("--json", action="store_true", help="Emit JSON.")
     refresh.set_defaults(handler=_cmd_refresh)
@@ -1363,6 +1521,27 @@ def build_parser() -> argparse.ArgumentParser:
     model_remove.add_argument("project", help="Project directory.")
     model_remove.add_argument("--json", action="store_true", help="Emit JSON.")
     model_remove.set_defaults(handler=_cmd_model_remove)
+
+    date_table = subparsers.add_parser(
+        "date-table",
+        help="Generate a one-row-per-day calendar dataset for time intelligence.",
+    )
+    date_table.add_argument("project", help="Project directory.")
+    date_table.add_argument("--start", required=True, help="First day (YYYY-MM-DD).")
+    date_table.add_argument("--end", required=True, help="Last day (YYYY-MM-DD).")
+    date_table.add_argument(
+        "--dataset", default="calendar", help="Dataset id to store (default: calendar)."
+    )
+    date_table.add_argument(
+        "--overwrite", action="store_true", help="Replace an existing calendar dataset."
+    )
+    date_table.add_argument(
+        "--rederive",
+        action="store_true",
+        help="Re-derive the semantic model afterwards (replaces the model).",
+    )
+    date_table.add_argument("--json", action="store_true", help="Emit JSON.")
+    date_table.set_defaults(handler=_cmd_date_table)
 
     query = subparsers.add_parser(
         "query", help="Run a semantic query (dimensions, measures and filters)."
@@ -1414,6 +1593,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--bookmarks", help="Saved views as a JSON list, @file or - for stdin."
     )
     dashboard_save.add_argument(
+        "--parameters",
+        help="What-if parameters as a JSON list, @file or - for stdin.",
+    )
+    dashboard_save.add_argument(
+        "--schedule",
+        choices=("manual", "on_open", "hourly", "daily"),
+        default="manual",
+        help="Refresh schedule (default: manual).",
+    )
+    dashboard_save.add_argument(
+        "--report",
+        action="store_true",
+        help="Rewrite reports/dashboard-<id>.html on every scheduled refresh.",
+    )
+    dashboard_save.add_argument(
         "--overwrite", action="store_true", help="Replace an existing dashboard id."
     )
     dashboard_save.add_argument("--json", action="store_true", help="Emit JSON.")
@@ -1443,6 +1637,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="FIELD=VALUE",
         help="Cross-filter every tile, for example: --filter region=North.",
+    )
+    dashboard_render.add_argument(
+        "--param",
+        action="append",
+        metavar="NAME=VALUE",
+        help="What-if parameter value, for example: --param top_n=5. Repeatable.",
     )
     dashboard_render.add_argument(
         "--theme",
@@ -1489,6 +1689,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cross-filter every tile, for example: --filter region=North.",
     )
     dashboard_report.add_argument(
+        "--param",
+        action="append",
+        metavar="NAME=VALUE",
+        help="What-if parameter value, for example: --param top_n=5. Repeatable.",
+    )
+    dashboard_report.add_argument(
         "--theme",
         choices=("light", "dark"),
         default="light",
@@ -1513,6 +1719,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError):  # non-reconfigurable streams
+            stream.reconfigure(errors="replace")  # consoles may be cp1252
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.handler(args))

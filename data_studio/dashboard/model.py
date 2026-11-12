@@ -14,12 +14,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..kernel.spec import ChartType
+from ..schedule import SCHEDULES
 from ..semantic.engine import QueryFilter, QueryOrder
 
 DASHBOARD_SCHEMA_VERSION = "1"
 TILE_KINDS = ("chart", "kpi", "table")
 TABLE_STYLES = ("plain", "data_bars", "heatmap")
 GRID_WIDTHS = (1, 2, 3, 4)
+PARAMETER_TYPES = ("number", "text", "choice", "boolean")
+_PARAM_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _DASHBOARD_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _TILE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 _UNSAFE = re.compile(r"[^a-z0-9-]+")
@@ -114,7 +117,7 @@ class DashboardTile:
     chart: str = "column"
     filters: tuple[QueryFilter, ...] = ()
     order_by: tuple[QueryOrder, ...] = ()
-    limit: int | None = None
+    limit: int | str | None = None
     subtitle: str = ""
     width: int = 1
     table_style: str = "plain"
@@ -145,9 +148,21 @@ class DashboardTile:
         object.__setattr__(self, "filters", _filters(self.filters))
         object.__setattr__(self, "order_by", _orders(self.order_by))
         if self.limit is not None:
-            limit = int(self.limit)
-            if limit < 1:
-                raise DashboardError("Tile limit must be at least 1.")
+            limit = self.limit
+            if isinstance(limit, str):
+                text = limit.strip()
+                if not (
+                    text.startswith("@")
+                    and _PARAM_NAME.match(text[1:])
+                ):
+                    raise DashboardError(
+                        "Tile limit must be a positive integer or '@parameter'."
+                    )
+                limit = text
+            else:
+                limit = int(limit)
+                if limit < 1:
+                    raise DashboardError("Tile limit must be at least 1.")
             object.__setattr__(self, "limit", limit)
         object.__setattr__(self, "subtitle", str(self.subtitle or ""))
         width = int(self.width)
@@ -317,6 +332,215 @@ class DashboardBookmark:
         )
 
 
+def _parameter_refs(value: Any) -> list[str]:
+    """Return the parameter names referenced by a filter value tree."""
+
+    refs: list[str] = []
+    if isinstance(value, str):
+        if value.startswith("@"):
+            refs.append(value[1:])
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for item in value:
+            refs.extend(_parameter_refs(item))
+    return refs
+
+
+def validate_parameter_references(
+    tiles: Sequence[DashboardTile], parameter_names: Sequence[str]
+) -> None:
+    """Reject tiles that reference parameters the dashboard does not declare."""
+
+    known = set(parameter_names)
+    for tile in tiles:
+        candidates: list[str] = []
+        if isinstance(tile.limit, str):
+            candidates.append(tile.limit[1:])
+        for item in tile.filters:
+            candidates.extend(_parameter_refs(item.value))
+        for name in candidates:
+            if name not in known:
+                raise DashboardError(
+                    f"Tile {tile.id!r} references unknown parameter @{name}; "
+                    "declare it in the dashboard parameters."
+                )
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardParameter:
+    """A what-if parameter the viewer can change without editing the dashboard.
+
+    A parameter is referenced from a tile filter value or the tile ``limit`` as
+    ``"@name"``; the renderer substitutes the chosen value (or the default) before
+    the query runs. Parameters are plain data — they never carry SQL or code.
+    """
+
+    name: str
+    type: str = "number"
+    title: str | None = None
+    default: Any = None
+    options: tuple[Any, ...] = ()
+    minimum: float | None = None
+    maximum: float | None = None
+    step: float | None = None
+
+    def __post_init__(self) -> None:
+        name = str(self.name).strip()
+        if not _PARAM_NAME.match(name):
+            raise DashboardError(
+                "Parameter name must be 1-64 letters, digits or underscores and "
+                f"start with a letter or underscore; got {self.name!r}."
+            )
+        object.__setattr__(self, "name", name)
+        kind = str(self.type).strip().lower()
+        if kind not in PARAMETER_TYPES:
+            raise DashboardError(
+                f"Parameter type must be one of: {', '.join(PARAMETER_TYPES)}."
+            )
+        object.__setattr__(self, "type", kind)
+        title = str(self.title).strip() if isinstance(self.title, str) else ""
+        object.__setattr__(self, "title", title or _humanize(name))
+
+        options: tuple[Any, ...] = ()
+        if kind == "choice":
+            raw = self.options
+            if isinstance(raw, str) or not isinstance(raw, Sequence):
+                raw = (raw,) if raw else ()
+            options = tuple(raw)
+            if not options:
+                raise DashboardError(
+                    f"Parameter {name!r} of type 'choice' needs at least one option."
+                )
+            for option in options:
+                if not isinstance(option, (str, int, float, bool)):
+                    raise DashboardError(
+                        f"Parameter {name!r} options must be text, numbers or booleans."
+                    )
+        object.__setattr__(self, "options", options)
+
+        default = self.default
+        if kind == "number":
+            if default is None:
+                default = 0.0
+            if isinstance(default, bool) or not isinstance(default, (int, float)):
+                raise DashboardError(f"Parameter {name!r} default must be a number.")
+            default = float(default)
+            minimum = self._bound("minimum", name)
+            maximum = self._bound("maximum", name)
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise DashboardError(f"Parameter {name!r} minimum is above maximum.")
+            step = self._bound("step", name)
+            if step is not None and step <= 0:
+                raise DashboardError(f"Parameter {name!r} step must be positive.")
+            if minimum is not None and default < minimum:
+                raise DashboardError(f"Parameter {name!r} default is below minimum.")
+            if maximum is not None and default > maximum:
+                raise DashboardError(f"Parameter {name!r} default is above maximum.")
+            object.__setattr__(self, "minimum", minimum)
+            object.__setattr__(self, "maximum", maximum)
+            object.__setattr__(self, "step", step)
+        elif kind == "text":
+            if default is None:
+                default = ""
+            if not isinstance(default, str):
+                raise DashboardError(f"Parameter {name!r} default must be text.")
+            object.__setattr__(self, "minimum", None)
+            object.__setattr__(self, "maximum", None)
+            object.__setattr__(self, "step", None)
+        elif kind == "boolean":
+            if default is None:
+                default = False
+            if not isinstance(default, bool):
+                raise DashboardError(f"Parameter {name!r} default must be true/false.")
+            object.__setattr__(self, "minimum", None)
+            object.__setattr__(self, "maximum", None)
+            object.__setattr__(self, "step", None)
+        else:  # choice
+            if default is None:
+                default = options[0]
+            if default not in options:
+                raise DashboardError(
+                    f"Parameter {name!r} default must be one of its options."
+                )
+            object.__setattr__(self, "minimum", None)
+            object.__setattr__(self, "maximum", None)
+            object.__setattr__(self, "step", None)
+        object.__setattr__(self, "default", default)
+
+    def _bound(self, label: str, name: str) -> float | None:
+        value = getattr(self, label)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise DashboardError(f"Parameter {name!r} {label} must be a number.")
+        return float(value)
+
+    def coerce(self, value: Any) -> Any:
+        """Validate and normalise one incoming value for this parameter."""
+
+        if value is None:
+            return self.default
+        kind = self.type
+        if kind == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                raise DashboardError(f"Parameter {self.name!r} expects a number.")
+            try:
+                number = float(value)
+            except (TypeError, ValueError) as exc:
+                raise DashboardError(
+                    f"Parameter {self.name!r} expects a number; got {value!r}."
+                ) from exc
+            if self.minimum is not None:
+                number = max(self.minimum, number)
+            if self.maximum is not None:
+                number = min(self.maximum, number)
+            return number
+        if kind == "text":
+            return str(value)
+        if kind == "boolean":
+            if isinstance(value, bool):
+                return value
+            text = str(value).strip().lower()
+            if text in {"true", "1", "yes", "on"}:
+                return True
+            if text in {"false", "0", "no", "off"}:
+                return False
+            raise DashboardError(f"Parameter {self.name!r} expects true or false.")
+        if value not in self.options:
+            raise DashboardError(
+                f"Parameter {self.name!r} must be one of: "
+                + ", ".join(str(option) for option in self.options)
+                + "."
+            )
+        return value
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "type": self.type,
+            "title": self.title,
+            "default": self.default,
+            "options": list(self.options),
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "step": self.step,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> DashboardParameter:
+        if not isinstance(payload, Mapping):
+            raise DashboardError("A parameter document must be an object.")
+        return cls(
+            name=str(payload.get("name", "")),
+            type=str(payload.get("type", "number")),
+            title=payload.get("title"),
+            default=payload.get("default"),
+            options=tuple(payload.get("options", ())),
+            minimum=payload.get("minimum"),
+            maximum=payload.get("maximum"),
+            step=payload.get("step"),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class Dashboard:
     """A named collection of tiles and slicers."""
@@ -327,6 +551,11 @@ class Dashboard:
     tiles: tuple[DashboardTile, ...] = ()
     slicers: tuple[DashboardSlicer, ...] = ()
     bookmarks: tuple[DashboardBookmark, ...] = ()
+    parameters: tuple[DashboardParameter, ...] = ()
+    schedule: str = "manual"
+    refreshed_at: str = ""
+    input_fingerprint: str = ""
+    report_path: str | None = None
     created_at: str = ""
     updated_at: str = ""
     schema_version: str = DASHBOARD_SCHEMA_VERSION
@@ -380,6 +609,36 @@ class Dashboard:
                 )
         object.__setattr__(self, "bookmarks", bookmarks)
 
+        parameters = tuple(self.parameters)
+        if any(not isinstance(item, DashboardParameter) for item in parameters):
+            raise DashboardError(
+                "Dashboard parameters must be DashboardParameter instances."
+            )
+        parameter_names = [item.name for item in parameters]
+        if len(set(parameter_names)) != len(parameter_names):
+            raise DashboardError("Dashboard parameter names must be unique.")
+        object.__setattr__(self, "parameters", parameters)
+
+        validate_parameter_references(self.tiles, parameter_names)
+
+        schedule = str(self.schedule).strip().lower()
+        if schedule not in SCHEDULES:
+            raise DashboardError(
+                f"Schedule must be one of: {', '.join(SCHEDULES)}."
+            )
+        object.__setattr__(self, "schedule", schedule)
+        for name in ("refreshed_at", "input_fingerprint"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise DashboardError(f"Dashboard {name} must be a string.")
+        if self.report_path is not None:
+            relative = str(self.report_path).replace("\\", "/")
+            if not relative.startswith("reports/"):
+                raise DashboardError(
+                    "Dashboard report artifacts must live under 'reports/'."
+                )
+            object.__setattr__(self, "report_path", relative)
+
         for name in ("created_at", "updated_at"):
             if not isinstance(getattr(self, name), str):
                 raise DashboardError(f"Dashboard {name} must be a string.")
@@ -395,6 +654,11 @@ class Dashboard:
             "tiles": [tile.to_dict() for tile in self.tiles],
             "slicers": [slicer.to_dict() for slicer in self.slicers],
             "bookmarks": [bookmark.to_dict() for bookmark in self.bookmarks],
+            "parameters": [item.to_dict() for item in self.parameters],
+            "schedule": self.schedule,
+            "refreshed_at": self.refreshed_at,
+            "input_fingerprint": self.input_fingerprint,
+            "report_path": self.report_path,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -429,6 +693,16 @@ class Dashboard:
                 else DashboardBookmark.from_dict(item)
                 for item in payload.get("bookmarks", ())
             ),
+            parameters=tuple(
+                item
+                if isinstance(item, DashboardParameter)
+                else DashboardParameter.from_dict(item)
+                for item in payload.get("parameters", ())
+            ),
+            schedule=str(payload.get("schedule", "manual")),
+            refreshed_at=str(payload.get("refreshed_at", "")),
+            input_fingerprint=str(payload.get("input_fingerprint", "")),
+            report_path=payload.get("report_path"),
             created_at=str(payload.get("created_at", "")),
             updated_at=str(payload.get("updated_at", "")),
             schema_version=str(
@@ -487,13 +761,16 @@ def validate_dashboard(dashboard: Dashboard, model: Any | None) -> list[str]:
 __all__ = [
     "DASHBOARD_SCHEMA_VERSION",
     "GRID_WIDTHS",
+    "PARAMETER_TYPES",
     "TABLE_STYLES",
     "TILE_KINDS",
     "Dashboard",
     "DashboardBookmark",
     "DashboardError",
+    "DashboardParameter",
     "DashboardSlicer",
     "DashboardTile",
     "slugify",
     "validate_dashboard",
+    "validate_parameter_references",
 ]

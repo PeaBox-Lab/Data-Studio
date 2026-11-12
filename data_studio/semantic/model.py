@@ -23,6 +23,8 @@ from .dsl import CompiledMeasure, MeasureError, ResolvedColumn, compile_measure
 MODEL_SCHEMA_VERSION = "1"
 MEASURE_FORMATS = ("number", "integer", "currency", "percent", "decimal")
 RELATIONSHIP_KINDS = ("many_to_one", "one_to_many", "one_to_one")
+GRAINS = ("year", "quarter", "month", "week", "day")
+GRAIN_PERIODS = {"year": 1, "quarter": 4, "month": 12, "week": 52, "day": 365}
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _UNSAFE_IDENTIFIER = re.compile(r"[^A-Za-z0-9_]+")
 
@@ -164,6 +166,7 @@ class SemanticDimension:
     column: str
     title: str | None = None
     description: str = ""
+    grain: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _identifier(self.name, "Dimension name"))
@@ -173,6 +176,16 @@ class SemanticDimension:
         )
         object.__setattr__(self, "title", _title(self.title, _humanize(self.name)))
         object.__setattr__(self, "description", str(self.description or ""))
+        grain = self.grain
+        if grain is not None:
+            grain = str(grain).strip().lower()
+            if not grain:
+                grain = None
+            elif grain not in GRAINS:
+                raise SemanticError(
+                    f"Dimension grain must be one of: {', '.join(GRAINS)}."
+                )
+        object.__setattr__(self, "grain", grain)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,6 +194,7 @@ class SemanticDimension:
             "column": self.column,
             "title": self.title,
             "description": self.description,
+            "grain": self.grain,
         }
 
     @classmethod
@@ -191,6 +205,7 @@ class SemanticDimension:
             column=str(payload.get("column", "")),
             title=payload.get("title"),
             description=str(payload.get("description", "")),
+            grain=payload.get("grain"),
         )
 
 
@@ -445,11 +460,22 @@ class SemanticModel:
                     )
         for dimension in self.dimensions:
             schema = schemas.get(dimension.table)
-            if schema is not None and dimension.column not in schema:
+            if schema is None:
+                continue
+            if dimension.column not in schema:
                 problems.append(
                     f"Dimension {dimension.name!r} column "
                     f"{dimension.table}.{dimension.column} does not exist."
                 )
+                continue
+            if dimension.grain is not None:
+                dtype = schema.column(dimension.column).dtype
+                if dtype not in {DataType.DATE, DataType.DATETIME, DataType.TIME}:
+                    problems.append(
+                        f"Dimension {dimension.name!r} has grain "
+                        f"{dimension.grain!r} but {dimension.table}.{dimension.column} "
+                        f"is {dtype.value}; a grain needs a date-like column."
+                    )
         resolver = self.column_resolver(schemas)
         for measure in self.measures:
             try:
@@ -518,10 +544,17 @@ class SemanticModel:
         return resolve
 
     def compiled_measure(
-        self, name: str, schemas: Mapping[str, TableSchema]
+        self,
+        name: str,
+        schemas: Mapping[str, TableSchema],
+        time_axis: tuple[str, int] | None = None,
     ) -> CompiledMeasure:
         measure = self.measure(name)
-        return compile_measure(measure.expression, self.column_resolver(schemas))
+        return compile_measure(
+            measure.expression,
+            self.column_resolver(schemas),
+            time_axis=time_axis,
+        )
 
     # -- serialisation -----------------------------------------------------
 
@@ -611,6 +644,7 @@ class SemanticModel:
         measures: list[SemanticMeasure] = []
         used_dimensions: set[str] = set()
         used_measures: set[str] = set()
+        grained: list[tuple[str, str, str]] = []  # (dimension, table, grain)
         for dataset in ordered:
             schema = schemas[dataset]
             table_name = table_by_dataset[dataset]
@@ -626,12 +660,18 @@ class SemanticModel:
                 } or column.role in {Role.DIMENSION, Role.TIME, Role.GEOGRAPHY}:
                     candidate = _choose_name(column.name, used_dimensions)
                     used_dimensions.add(candidate)
+                    grain = None
+                    if column.dtype in {DataType.DATE, DataType.DATETIME, DataType.TIME}:
+                        grain = _GRAIN_BY_COLUMN.get(column.name.lower())
+                    if grain:
+                        grained.append((candidate, table_name, grain))
                     dimensions.append(
                         SemanticDimension(
                             name=candidate,
                             table=table_name,
                             column=column.name,
                             title=title,
+                            grain=grain,
                         )
                     )
                 elif column.dtype in NUMERIC_TYPES and column.role != Role.IDENTIFIER:
@@ -667,13 +707,50 @@ class SemanticModel:
         else:
             default = tables[0].name
 
+        hierarchies: list[SemanticHierarchy] = []
+        # A generated calendar yields year/quarter/month/day dimensions; offer the
+        # obvious drill path as a hierarchy instead of making users rebuild it.
+        wanted: dict[str, str | None] = {
+            "year": None,
+            "quarter": None,
+            "month": None,
+            "day": None,
+        }
+        calendar_tables: set[str] = set()
+        for dimension_name, table_name, grain in grained:
+            if wanted.get(grain) is None:
+                wanted[grain] = dimension_name
+            calendar_tables.add(table_name)
+        if len(calendar_tables) == 1 and all(wanted.values()):
+            levels = tuple(
+                wanted[key] for key in ("year", "quarter", "month", "day")
+            )
+            hierarchies.append(
+                SemanticHierarchy(
+                    name="calendar",
+                    levels=levels,  # type: ignore[arg-type]
+                    title="Calendar",
+                    description="Drill from year down to the day.",
+                )
+            )
+
         return cls(
             name=name,
             tables=tuple(tables),
             dimensions=tuple(dimensions),
             measures=tuple(measures),
+            hierarchies=tuple(hierarchies),
             default_table=default,
         )
+
+
+_GRAIN_BY_COLUMN = {
+    "date": "day",
+    "month_start": "month",
+    "quarter_start": "quarter",
+    "year_start": "year",
+    "week_start": "week",
+}
 
 
 def _alias(table_name: str) -> str:
@@ -693,6 +770,8 @@ def _guess_format(column_name: str) -> str:
 
 
 __all__ = [
+    "GRAINS",
+    "GRAIN_PERIODS",
     "MEASURE_FORMATS",
     "MODEL_SCHEMA_VERSION",
     "RELATIONSHIP_KINDS",

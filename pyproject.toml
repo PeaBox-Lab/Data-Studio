@@ -39,6 +39,7 @@ dev = [
 
 [project.scripts]
 data-studio = "data_studio.cli.main:run"
+data-studio-ui = "data_studio.ui.app:run"
 
 [tool.setuptools.packages.find]
 include = ["data_studio*"]
@@ -67,10 +68,7 @@ line-length = 100
 target-version = "py311"
 extend-exclude = [
   ".venv",
-  "data_studio_v0.38.py",
-  "data_studio_*_v0_38.py",
-  "data_studio_headless_v0.38.py",
-  "data_studio_ci_v0.38.py",
+  "legacy",
 ]
 
 [tool.ruff.lint]

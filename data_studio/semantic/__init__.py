@@ -8,6 +8,7 @@ The semantic layer sits between stored datasets and dashboards:
 * :mod:`data_studio.semantic.engine` executes typed queries with relationship joins.
 """
 
+from .calendar import CALENDAR_DATASET, CalendarError, calendar_sql, generate_calendar
 from .dsl import (
     CompiledMeasure,
     MeasureError,
@@ -24,6 +25,8 @@ from .engine import (
     SemanticResult,
 )
 from .model import (
+    GRAIN_PERIODS,
+    GRAINS,
     MEASURE_FORMATS,
     MODEL_SCHEMA_VERSION,
     RELATIONSHIP_KINDS,
@@ -38,10 +41,14 @@ from .model import (
 from .store import MODEL_PATH, SemanticModelStore
 
 __all__ = [
+    "CALENDAR_DATASET",
+    "GRAINS",
+    "GRAIN_PERIODS",
     "MEASURE_FORMATS",
     "MODEL_PATH",
     "MODEL_SCHEMA_VERSION",
     "RELATIONSHIP_KINDS",
+    "CalendarError",
     "CompiledMeasure",
     "MeasureError",
     "QueryFilter",
@@ -59,6 +66,8 @@ __all__ = [
     "SemanticQuery",
     "SemanticResult",
     "SemanticTable",
+    "calendar_sql",
     "compile_measure",
+    "generate_calendar",
     "referenced_columns",
 ]

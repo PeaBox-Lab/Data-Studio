@@ -1,10 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 
 import pandas as pd
 
-from data_studio_core_v0_38 import (
+from data_studio_core import (
     calculate_deployment_health,
     infer_validation_rules,
     promotion_readiness,
