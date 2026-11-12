@@ -38,6 +38,7 @@ from ..project.manifest import (
 )
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
+from ..script import SCRIPT_FORMATS, generate_script
 from ..semantic import (
     CalendarError,
     QueryFilter,
@@ -45,8 +46,8 @@ from ..semantic import (
     SemanticEngine,
     SemanticModel,
     SemanticModelStore,
-    generate_calendar,
     SemanticQuery,
+    generate_calendar,
 )
 from ..version import __version__
 
@@ -533,6 +534,32 @@ def _cmd_report(args: argparse.Namespace) -> int:
                 )
                 return 0
             print(f"Wrote {analysis.title} report to {written}")
+        return 0
+    except _ERRORS as exc:
+        return _fail(exc)
+
+
+def _cmd_script(args: argparse.Namespace) -> int:
+    try:
+        with _open(args) as project:
+            script = generate_script(project, fmt=args.format)
+            if args.output:
+                path = Path(args.output)
+                if not path.is_absolute():
+                    path = safe_project_path(
+                        project.root, args.output.replace("\\", "/")
+                    )
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(script, encoding="utf-8", newline="\n")
+                if args.json:
+                    _print_json({"destination": str(path), "format": args.format})
+                else:
+                    print(f"Wrote {args.format} script to {path}")
+                return 0
+            if args.json:
+                _print_json({"script": script, "format": args.format})
+            else:
+                print(script)
         return 0
     except _ERRORS as exc:
         return _fail(exc)
@@ -1355,6 +1382,27 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--json", action="store_true", help="Emit JSON.")
     report.set_defaults(handler=_cmd_report)
 
+    script = subparsers.add_parser(
+        "script",
+        help=(
+            "Generate a reproducible Python or R script for the project's "
+            "pipeline (runs anywhere; only duckdb and pandas needed)."
+        ),
+    )
+    script.add_argument("project", help="Project directory.")
+    script.add_argument(
+        "--format",
+        choices=SCRIPT_FORMATS,
+        default="python",
+        help="Script language (default: python).",
+    )
+    script.add_argument(
+        "--output",
+        help="Write the script to this path (default: print to stdout).",
+    )
+    script.add_argument("--json", action="store_true", help="Emit JSON.")
+    script.set_defaults(handler=_cmd_script)
+
     save_analysis = subparsers.add_parser(
         "save-analysis",
         help="Run an analysis and persist it under analyses/ for refresh and reuse.",
@@ -1404,7 +1452,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     refresh = subparsers.add_parser(
         "refresh",
-        help="Refresh due (or all) saved analyses and dashboards; suitable for Task Scheduler/cron.",
+        help=(
+            "Refresh due (or all) saved analyses and dashboards; "
+            "suitable for Task Scheduler/cron."
+        ),
     )
     refresh.add_argument("project", help="Project directory.")
     refresh.add_argument("saved_id", nargs="?", help="Refresh only this saved analysis.")
@@ -1668,6 +1719,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError):  # non-reconfigurable streams
+            stream.reconfigure(errors="replace")  # consoles may be cp1252
     parser = build_parser()
     args = parser.parse_args(argv)
     return int(args.handler(args))

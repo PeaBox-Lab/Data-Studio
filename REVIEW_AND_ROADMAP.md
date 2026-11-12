@@ -15,7 +15,7 @@ added SVG charts, self-contained HTML reports, saved analyses with fingerprint i
 scheduled refresh and report artifacts. Phase 3A added the semantic model, the safe measure
 DSL, live dashboards with shared slicers and dashboard HTML export. Phase 3B added tile
 sorting and top-N, table data bars/heatmaps, saved views (bookmarks) and print/PNG export. The
-suite stands at 534 tests plus the frozen v0.38 gate.
+suite stands at 590 tests plus the frozen v0.38 gate.
 
 ---
 
@@ -444,7 +444,7 @@ render the same numbers.
 
 ### Phase 3 — Semantic model and dashboards (6–8 weeks)
 
-**Status: Phase 3A and 3B implemented; 3C–3D remain.** A project now owns one semantic model at
+**Status: Phase 3A–3D and Phase 4 complete; Phase 5 remains.** A project now owns one semantic model at
 `models/semantic.json` (tables, relationships, typed dimensions and measures) and dashboard
 documents under `dashboards/<id>.json`. Measures use a safe DSL (`sum(amount)`,
 `sum(amount) / count()`, `sum(units) where region = 'North'`) that compiles to quoted DuckDB
@@ -464,20 +464,44 @@ rather than failing the dashboard.
 - [x] Self-contained dashboard HTML export.
 - [x] Top-N and sorting; conditional table formatting (data bars, heatmap).
 - [x] Saved views (bookmarks) and print/PDF plus per-chart PNG export.
-- [ ] Hierarchies, date table and time-intelligence measures (year-over-year, running total).
-- [ ] Cross-highlight, drill-down and tile tooltips.
-- [ ] Parameters and interactive tile controls.
-- [ ] Scheduled refresh of dashboards alongside saved analyses.
+- [x] Hierarchies, date (calendar) table and time-intelligence measures (year-over-year, running total) — Calendar dataset generator (`data-studio date-table`, `POST /api/v1/model/date-table`), `grain` on date dimensions, automatic Calendar hierarchy from derivation, `running_total`/`yoy`/`yoy_pct` in the safe measure DSL, grain editing in the workspace model panel.
+- [x] Cross-highlight, drill-down and tile tooltips — chart marks and table rows cross-filter every tile (removable chips), hierarchy tiles drill year → quarter → month → day with breadcrumbs, and every tile carries a **SQL** details view (dimensions, measures, elapsed time, compiled SQL).
+- [x] Parameters and interactive tile controls — typed what-if parameters (`number`/`text`/`choice`/`boolean` with defaults, bounds and options) referenced as `@name` in tile filters and the row cap; the workspace parameter bar re-queries tiles live; the builder has a parameter repeater and per-tile filter rows.
+- [x] Scheduled refresh of dashboards alongside saved analyses — `schedule` (`manual`/`on_open`/`hourly`/`daily`), `refreshed_at` and input fingerprints on dashboard documents; `data-studio refresh --due`, project open and the workspace minute timer refresh dashboards too; fresh/stale pills, a schedule selector and **Refresh now** in the workspace; optional `reports/dashboard-<id>.html` artifacts rewritten on each refresh (`dashboard-save --report`).
 
 **Done when:** a dashboard can be built without code, filtered interactively, refreshed on a schedule, and exported as a report.
 
-### Phase 4 — Excel-like editing and scripting (4–6 weeks)
+### Phase 4 — Excel-like editing and scripting (delivered)
 
-- Formula bar with the expression DSL (typed, compile to SQL/Polars), fill down, find/replace, bulk edits, clipboard, column ops.
-- Pivot UI (rows/columns/values/filters, multiple aggregations).
-- Conditional formatting, data validation lists, freeze panes.
-- Python code step (subprocess, declared inputs/outputs) and optional R step.
-- Script export: generate a reproducible Python/R script for any pipeline.
+**Status: complete** (one desktop-editing gap closed by design: the friendly app owns
+validation lists; the workspace owns conditional formatting and the formula bar).
+
+- [x] Formula bar with the expression DSL — workspace **Prepare** card: `fx` input, target
+  picker (replace a column or create one — `derive` step), `Check` (type probe via
+  `/api/v1/formula/check`), `Apply` (adds the step and re-runs), fill down (forward-fill),
+  find/replace (regex-capable via `replace_text`), rename/cast/drop quick actions, copy
+  preview as TSV.
+- [x] Pivot UI — new **Pivot** view: rows (multi), optional single pivot column, values
+  with per-value aggregations (sum/avg/count/distinct count/min/max/median/stddev),
+  filters, copy-as-TSV, and "Add to pipeline" (single value, single pivot column).
+  Executed by `data_studio/pivot.py` as one conditional-`CASE` DuckDB query; exposed at
+  `POST /api/v1/pivot`.
+- [x] Conditional formatting, data validation lists, freeze panes — per-dataset rules
+  (`data_bars`, `heatmap`, `highlight` with six operators and four colors) persisted in
+  `formats/<dataset>.json`, applied to every grid in the workspace (`.table-wrap` is
+  sticky-header/first-column; toggle exists in the preview pane); desktop app gained
+  **validation lists** (Qt delegate dropdown + rejected out-of-list edits) on top of the
+  always-pinned Qt headers.
+- [x] Python/R code steps — `code` step (`python_/R`, declared I/O via
+  `DATA_STUDIO_INPUT_PARQUET`/`DATA_STUDIO_OUTPUT_PARQUET`, 64 KB limit, timeout kill,
+  stderr/stdout tail on failure); registered in the default pipeline registry, so it is
+  immediately addable in the workspace (monospace multi-line form control), the CLI and
+  the API.
+- [x] Script export — `data-studio script <project> [--format python|r] [--output PATH]`
+  and `POST /api/v1/script`: SQL steps are emitted as nested DuckDB SQL with dataset
+  paths made project-relative; code steps are inlined and re-executed on run (Python
+  inline, R via `Rscript`); the Python script needs only `duckdb` + `pandas`, the R
+  script only `duckdb` + `DBI`. Provenance header lists every step with its id.
 
 **Done when:** a user can replace a routine Excel workbook with a saved, reproducible project.
 

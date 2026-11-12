@@ -386,6 +386,37 @@
   .cell-drill { cursor: pointer; }
   .cell-drill:hover { text-decoration: underline dotted; }
   .dash-tile .schedule-pill { display: inline-flex; gap: 5px; align-items: center; }
+  .formula-card .formula-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .formula-card .fx { font-style: italic; font-weight: 800; color: var(--accent); font-size: 15px; }
+  .formula-card #formulaTarget { width: auto; min-width: 140px; }
+  .formula-card #formulaInput { flex: 1 1 auto; min-width: 220px; }
+  .formula-check { display: flex; gap: 8px; align-items: center; margin-top: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+  .formula-toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .formula-find { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .formula-find input { flex: 1 1 160px; }
+  .pivot-grid { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .pivot-field-group { display: grid; gap: 6px; margin-bottom: 12px; }
+  .pivot-field-group select { width: 100%; }
+  .pivot-value-row { display: grid; grid-template-columns: minmax(0,1.25fr) 116px minmax(0,1fr) auto; gap: 6px; margin-bottom: 6px; }
+  .pivot-value-row select, .pivot-value-row input { width: 100%; min-width: 0; }
+  textarea.mono { font-family: var(--mono, ui-monospace, Menlo, Consolas, monospace); font-size: 11.5px; line-height: 1.5; min-height: 140px; white-space: pre; }
+  .format-details { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+  .format-details > summary { list-style: none; cursor: pointer; padding: 7px 10px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+  .format-details > summary::-webkit-details-marker { display: none; }
+  .format-details > summary::before { content: "▸"; display: inline-block; width: 12px; color: var(--muted); font-size: 10px; transition: transform .15s; }
+  .format-details[open] > summary::before { transform: rotate(90deg); }
+  .format-panel { display: grid; gap: 8px; padding: 0 10px 10px; }
+  .format-rule-list { display: grid; gap: 6px; }
+  .format-rule { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); }
+  .format-rule .ds-main { min-width: 0; }
+  .format-add { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .format-add select, .format-add input { width: auto; min-width: 110px; }
+  .format-add .btn { margin-left: auto; }
+  .grain-select { width: auto; min-width: 108px; font-size: 10.5px; padding: 2px 4px; margin-left: auto; flex: 0 0 auto; }
+  .calendar-box { border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 10px 12px; display: grid; gap: 8px; }
+  .calendar-box .calendar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+  .calendar-box label { display: grid; gap: 3px; font-size: 11px; font-weight: 700; color: var(--muted); }
+  .calendar-box .check { display: flex; align-items: center; gap: 6px; font-weight: 400; }
   .dash-canvas { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; }
   .dash-tile {
     display: grid; gap: 8px; align-content: start; min-width: 0;
@@ -401,7 +432,28 @@
   .dash-kpi { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 2px; }
   .dash-kpi .label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; }
   .dash-kpi .value { font-size: 26px; font-weight: 700; letter-spacing: -.04em; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .table-wrap { max-height: 480px; overflow: auto; }
+  .table-wrap table { border-collapse: separate; border-spacing: 0; }
+  .table-wrap thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--panel-2); border-bottom: 2px solid var(--line-strong, var(--line));
+  }
+  .table-wrap th:first-child, .table-wrap td:first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--panel);
+    box-shadow: 1px 0 0 var(--line);
+  }
+  .table-wrap thead th:first-child { z-index: 3; background: var(--panel-2); }
+  .table-wrap td.fmt-bar { background: linear-gradient(90deg, var(--accent-soft) 0 var(--pct, 0%), transparent var(--pct, 0%)); }
+  .table-wrap td.fmt-heat { background: rgba(37, 99, 235, var(--heat, 0)); }
+  .table-wrap td.fmt-red { background: #fee2e2; }
+  .dark .table-wrap td.fmt-red { background: rgba(248, 113, 113, .25); }
+  .table-wrap td.fmt-amber { background: #fef3c7; }
+  .dark .table-wrap td.fmt-amber { background: rgba(251, 191, 36, .22); }
+  .table-wrap td.fmt-green { background: #dcfce7; }
+  .dark .table-wrap td.fmt-green { background: rgba(52, 211, 153, .22); }
   .dash-tile .table-wrap { max-height: 260px; }
+  .table-wrap td.fmt-blue { background: #dbeafe; }
+  .dark .table-wrap td.fmt-blue { background: rgba(96, 165, 250, .25); }
   .dash-empty { border: 1px dashed var(--line); border-radius: 12px; background: var(--panel-2); color: var(--muted); padding: 26px 20px; text-align: center; font-size: 12.5px; }
   .dash-tile-list { display: grid; gap: 9px; }
   .tile-row, .slicer-row { display: grid; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); padding: 10px; }
@@ -411,6 +463,15 @@
   .tile-row .form-grid, .slicer-row .form-grid { gap: 8px; }
   .tile-row select[multiple] { min-height: 88px; }
   .tile-row .section-head, .slicer-row .section-head { margin-bottom: 0; }
+  .filter-block { display: grid; gap: 6px; }
+  .filter-block-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .filter-block-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+  .filter-block-head .hint { font-size: 10.5px; }
+  .filter-rows { display: grid; gap: 6px; }
+  .filter-row { display: grid; grid-template-columns: minmax(0,1fr) 90px minmax(0,1fr) auto; gap: 6px; align-items: center; }
+  .btn.xs { padding: 1px 7px; font-size: 11px; border-radius: 8px; }
+  .param-num-grid, .param-text-grid, .param-bool-grid, .param-choice-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .parameter-row .param-num-grid select, .parameter-row .param-num-grid input { width: 100%; }
 
   /* dialogs */
   dialog.dialog {
@@ -500,6 +561,10 @@
       <button class="nav-item" data-view="analyze" data-tip="Descriptive, inferential and time-series analyses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
         <span>Analyze</span>
+      </button>
+      <button class="nav-item" data-view="pivot" data-tip="Pivot tables with rows, values and pivot columns">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18M3 12h18M3 19h12"/><path d="M15 15l6 6M21 15l-6 6"/></svg>
+        <span>Pivot</span>
       </button>
       <button class="nav-item" data-view="dashboards" data-tip="Live dashboards built from the semantic model, with slicers">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="10" width="8" height="11" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>
@@ -628,6 +693,40 @@
               </div>
               <div data-datapanel="preview" id="previewPane" hidden>
                 <div id="previewTable"><p class="empty">Select a dataset.</p></div>
+                <details class="format-details" id="formatDetails">
+                  <summary>Conditional formatting <span class="pill gray" id="formatCount">0</span></summary>
+                  <div class="format-panel">
+                    <p class="hint">Rules live in the project and apply to the preview grid. Data bars and heatmaps scale a column to its range; highlight marks cells matching a comparison.</p>
+                    <div id="formatRuleList" class="format-rule-list"></div>
+                    <div class="format-add">
+                      <select id="formatColumn" aria-label="Column"></select>
+                      <select id="formatKind" aria-label="Rule kind">
+                        <option value="data_bars">Data bars</option>
+                        <option value="heatmap">Heatmap</option>
+                        <option value="highlight">Highlight…</option>
+                      </select>
+                      <select id="formatOp" aria-label="Operator" hidden>
+                        <option value="&gt;">&gt;</option>
+                        <option value="&gt;=">&ge;</option>
+                        <option value="&lt;">&lt;</option>
+                        <option value="&lt;=">&le;</option>
+                        <option value="=">=</option>
+                        <option value="!=">≠</option>
+                        <option value="between">between</option>
+                      </select>
+                      <input id="formatValue" type="number" step="any" placeholder="value" hidden aria-label="Comparison value">
+                      <input id="formatValue2" type="number" step="any" placeholder="max" hidden aria-label="Upper bound">
+                      <select id="formatColor" aria-label="Highlight color" hidden>
+                        <option value="red">Red</option>
+                        <option value="amber">Amber</option>
+                        <option value="green">Green</option>
+                        <option value="blue">Blue</option>
+                      </select>
+                      <button class="btn sm primary" id="formatAdd" type="button">Add rule</button>
+                    </div>
+                    <p class="status" id="formatStatus"></p>
+                  </div>
+                </details>
               </div>
             </div>
           </div>
@@ -648,6 +747,40 @@
             <div class="pipeline-meta" id="pipelineMeta"></div>
             <div id="stepList" class="step-list"></div>
             <p class="status" id="stepStatus"></p>
+          </div>
+        </div>
+
+        <div class="card formula-card">
+          <div class="card-head">
+            <div><span class="eyebrow">Formula</span><h2>Formula bar</h2></div>
+            <span class="pill gray" id="formulaTargetPill">Run the pipeline to enable</span>
+          </div>
+          <div class="card-body">
+            <div class="formula-bar">
+              <span class="fx" aria-hidden="true">fx</span>
+              <select id="formulaTarget" aria-label="Target column" data-tip="Pick an existing column to replace, or ＋ New column to create one" disabled></select>
+              <input id="formulaInput" class="mono" placeholder="amount * 1.2   or   upper(region)" autocomplete="off" spellcheck="false" data-tip="Type an expression with column names, literals and approved functions, e.g. round(amount * 1.2, 2)" disabled>
+              <button class="btn sm" id="formulaCheck" type="button" data-tip="Check the expression compiles and see a sample" disabled>Check</button>
+              <button class="btn primary sm" id="formulaApply" type="button" data-tip="Add a derive step with this expression and re-run" disabled>Apply</button>
+            </div>
+            <div class="formula-check" id="formulaCheckResult" hidden>
+              <span class="badge" id="formulaCheckBadge"></span>
+              <span class="mono" id="formulaCheckSample"></span>
+            </div>
+            <p class="status" id="formulaStatus"></p>
+            <div class="formula-toolbar" role="toolbar" aria-label="Column actions">
+              <button class="btn xs ghost" id="fillDownBtn" type="button" disabled data-tip="Add a fill-forward step that copies the previous non-empty value down (requires an order column)">Fill down</button>
+              <button class="btn xs ghost" id="findReplaceBtn" type="button" disabled data-tip="Replace text in this column (find and replace inputs appear below)">Find &amp; replace</button>
+              <button class="btn xs ghost" id="renameColumnBtn" type="button" disabled data-tip="Rename the selected column">Rename…</button>
+              <button class="btn xs ghost" id="castColumnBtn" type="button" disabled data-tip="Cast the selected column to another type">Cast…</button>
+              <button class="btn xs ghost danger" id="dropColumnBtn" type="button" disabled data-tip="Drop the selected column">Drop</button>
+              <button class="btn xs ghost" id="copyTsvBtn" type="button" disabled data-tip="Copy the current preview as tab-separated values for pasting into Excel or Sheets">Copy TSV</button>
+            </div>
+            <div class="formula-find" id="formulaFindRow" hidden>
+              <input id="formulaFind" placeholder="Find (literal text)" autocomplete="off">
+              <input id="formulaReplace" placeholder="Replace with" autocomplete="off">
+              <button class="btn sm primary" id="formulaFindApply" type="button">Apply replace</button>
+            </div>
           </div>
         </div>
 
@@ -707,6 +840,51 @@
               <span class="pill" id="analysisKind" hidden></span>
             </div>
             <div class="card-body" id="analysisResult"><p class="empty">Run an analysis to see typed metrics, tables and charts.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Pivot ------------------------------------------------------------->
+      <section data-panel="pivot" id="panel-pivot" hidden>
+        <div class="panel-grid pivot-grid">
+          <div class="card">
+            <div class="card-head">
+              <div><span class="eyebrow">Build</span><h2>Pivot table</h2></div>
+              <span class="pill gray" id="pivotPill">Choose fields</span>
+            </div>
+            <div class="card-body">
+              <p class="hint">Pick row fields, an optional pivot column and one or more values with their own aggregations. Source is the cleaned pipeline output by default.</p>
+              <label class="check compact" data-tip="On: pivot the cleaned pipeline output. Off: pivot the raw stored dataset."><input type="checkbox" id="pivotUsePipeline" checked> Use the cleaned pipeline output</label>
+              <div class="pivot-field-group">
+                <span class="eyebrow">Rows</span>
+                <select id="pivotRows" multiple size="4" aria-label="Row fields"></select>
+                <small class="hint">Hold Ctrl to pick several.</small>
+              </div>
+              <div class="pivot-field-group">
+                <span class="eyebrow">Columns</span>
+                <select id="pivotColumn" aria-label="Pivot column">
+                  <option value="">(none — totals only)</option>
+                </select>
+              </div>
+              <div class="pivot-field-group">
+                <span class="eyebrow">Values</span>
+                <div id="pivotValueRows"></div>
+                <button class="btn sm" id="addPivotValue" type="button">+ Add value</button>
+              </div>
+              <p class="status" id="pivotStatus"></p>
+              <div class="actions">
+                <button class="btn primary" id="runPivot" type="button" disabled>Preview pivot</button>
+                <button class="btn" id="copyPivotTsv" type="button" disabled>Copy TSV</button>
+                <button class="btn" id="pivotToStep" type="button" disabled data-tip="Add this pivot to the pipeline as a Pivot wider step (single value only)">Add to pipeline</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div><span class="eyebrow">Result</span><h2>Output</h2></div>
+              <span class="pill gray" id="pivotRowCount">—</span>
+            </div>
+            <div class="card-body" id="pivotResult"><p class="empty">Configure the pivot and choose Preview pivot.</p></div>
           </div>
         </div>
       </section>
@@ -1032,6 +1210,8 @@ const state = {
   parameterValues: {},
   crossFilters: [],
   drillSelections: {},
+  pivot: null,
+  formats: {},
   dashboardSchedules: ["manual", "on_open", "hourly", "daily"],
   dashboardRequest: 0,
   autoRefresh: localStorage.getItem("dataStudio.autoRefresh") !== "false",
@@ -1046,6 +1226,7 @@ const VIEW_META = {
   overview: ["Overview", "Workspace summary and next actions."],
   data: ["Data", "Import sources, inspect schemas and preview rows."],
   prepare: ["Prepare", "Build and run a validated cleaning pipeline."],
+  pivot: ["Pivot", "Rows, values and pivot columns — multiple aggregations per value."],
   analyze: ["Analyze", "Descriptive, inferential, time-series and forecasting analyses."],
   dashboards: ["Dashboards", "Live tiles and slicers built on the semantic model."],
   saved: ["Saved", "Persisted analyses, freshness and scheduled refresh."],
@@ -1270,6 +1451,7 @@ function navigate(view) {
   if (view === "prepare") renderPipeline();
   if (view === "analyze") renderAnalysisResult();
   if (view === "dashboards") renderDashboards();
+  if (view === "pivot") { refreshPivotFields(); refreshPivotValues(); }
   if (view === "saved") renderSaved();
   if (view === "export") renderExportContext();
 }
@@ -1360,6 +1542,7 @@ async function refreshProject() {
     state.schema = null;
     state.preview = null;
     state.run = null;
+    state.formats = {};
     state.saved = [];
     state.savedErrors = [];
     state.model = null;
@@ -1429,10 +1612,13 @@ async function selectDataset(datasetId, silent = false) {
     state.schema = schema;
     state.preview = preview;
     renderSchema();
+    await loadFormatsFor(datasetId);
     renderPreview();
     renderData();
     renderProject();
     renderStepForm();
+    refreshPivotFields();
+    refreshPivotValues();
   } catch (error) {
     if (!silent) toast(error.message, "error");
     setStatus("datasetStatus", error.message, true);
@@ -1502,7 +1688,128 @@ function renderPreview() {
     container.replaceChildren(el("p", { class: "empty", text: "Select a dataset to preview rows." }));
     return;
   }
-  container.replaceChildren(buildTable(state.preview.schema.columns.map((column) => column.name), state.preview.rows));
+  const rules = (state.formats || {})[state.selectedDataset] || [];
+  container.replaceChildren(buildTable(
+    state.preview.schema.columns.map((column) => column.name),
+    state.preview.rows,
+    { formats: rules }
+  ));
+}
+
+function loadFormatsFor(datasetId) {
+  if (!datasetId) return Promise.resolve([]);
+  return api(`/api/v1/datasets/${encodeURIComponent(datasetId)}/format`)
+    .then((payload) => {
+      state.formats = { ...state.formats, [datasetId]: payload.rules || [] };
+      renderFormatPanel(datasetId);
+      renderPreview();
+      return state.formats[datasetId];
+    })
+    .catch((error) => {
+      state.formats = { ...state.formats, [datasetId]: [] };
+      renderFormatPanel(datasetId);
+      return [];
+    });
+}
+
+function renderFormatPanel(datasetId) {
+  const list = document.getElementById("formatRuleList");
+  const count = document.getElementById("formatCount");
+  const columnSelect = document.getElementById("formatColumn");
+  if (!list || !columnSelect) return;
+  const rules = (state.formats || {})[datasetId] || [];
+  if (count) count.textContent = String(rules.length);
+  list.replaceChildren();
+  if (!rules.length) {
+    list.append(el("p", { class: "empty", text: "No rules yet. Add one below." }));
+  }
+  for (const rule of rules) {
+    const describe = rule.kind === "highlight"
+      ? `${rule.kind} ${rule.op} ${rule.value}${rule.op === "between" ? ` and ${rule.value2}` : ""} · ${rule.color}`
+      : rule.kind;
+    const row = el("div", { class: "format-rule" },
+      el("div", { class: "ds-main" },
+        el("strong", { text: rule.column }),
+        el("span", { class: "meta", text: describe })
+      )
+    );
+    const remove = el("button", { type: "button", class: "btn xs danger", text: "×", "aria-label": `Remove ${rule.kind} rule on ${rule.column}` });
+    remove.addEventListener("click", () => removeFormatRule(datasetId, rule));
+    row.append(remove);
+    list.append(row);
+  }
+  const previous = columnSelect.value;
+  columnSelect.replaceChildren(...(state.schema && state.schema.columns || []).map((column) =>
+    el("option", { value: column.name, text: `${column.name} · ${column.dtype}` })
+  ));
+  if ([...columnSelect.options].some((option) => option.value === previous)) columnSelect.value = previous;
+}
+
+async function saveFormats(datasetId, rules) {
+  const saved = await task(
+    () => api(`/api/v1/datasets/${encodeURIComponent(datasetId)}/format`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules })
+    }),
+    "formatStatus",
+    "Formats saved."
+  );
+  if (!saved) return;
+  state.formats = { ...state.formats, [datasetId]: saved.rules || [] };
+  renderFormatPanel(datasetId);
+  renderPreview();
+}
+
+async function addFormatRule() {
+  const datasetId = state.selectedDataset;
+  if (!datasetId) return;
+  const column = document.getElementById("formatColumn").value;
+  const kind = document.getElementById("formatKind").value;
+  const op = document.getElementById("formatOp").value;
+  const value = document.getElementById("formatValue").value;
+  const value2 = document.getElementById("formatValue2").value;
+  const color = document.getElementById("formatColor").value;
+  if (!column) {
+    setStatus("formatStatus", "Pick a column first.", true);
+    return;
+  }
+  const rule = { column, kind, color };
+  if (kind === "highlight") {
+    if (value === "") {
+      setStatus("formatStatus", "Enter a comparison value.", true);
+      return;
+    }
+    rule.op = op;
+    rule.value = Number(value);
+    if (op === "between") {
+      if (value2 === "") {
+        setStatus("formatStatus", "Enter the upper bound for 'between'.", true);
+        return;
+      }
+      rule.value2 = Number(value2);
+    }
+  }
+  const rules = [...((state.formats || {})[datasetId] || []), rule];
+  await saveFormats(datasetId, rules);
+}
+
+async function removeFormatRule(datasetId, rule) {
+  const rules = ((state.formats || {})[datasetId] || []).filter(
+    (item) => !(item.column === rule.column && item.kind === rule.kind && item.op === rule.op && String(item.value) === String(rule.value))
+  );
+  await saveFormats(datasetId, rules);
+}
+
+function syncFormatControls() {
+  const kind = document.getElementById("formatKind");
+  if (!kind) return;
+  const isHighlight = kind.value === "highlight";
+  const isBetween = isHighlight && document.getElementById("formatOp").value === "between";
+  document.getElementById("formatOp").hidden = !isHighlight;
+  document.getElementById("formatValue").hidden = !isHighlight;
+  document.getElementById("formatColor").hidden = !isHighlight;
+  document.getElementById("formatValue2").hidden = !isBetween;
 }
 
 /* -- pipeline ------------------------------------------------------------ */
@@ -1586,6 +1893,12 @@ function makeControl(param, prefix) {
     }
     return select;
   }
+  if (param.kind === "code") {
+    const area = el("textarea", { ...common, class: "wide mono", spellcheck: "false",
+      placeholder: "import duckdb\nimport os\ncon = duckdb.connect()\n...", rows: "10" });
+    area.value = defaultText(param);
+    return area;
+  }
   if (param.kind === "mapping" || param.kind === "aggregations" || param.kind === "any") {
     const area = el("textarea", { ...common, class: "wide", placeholder: param.kind === "any" ? "Value or JSON" : "JSON object" });
     const defaultValue = param.default === null || param.default === undefined ? "" : JSON.stringify(param.default, null, 2);
@@ -1620,7 +1933,7 @@ function renderParamForm(container, params, prefix) {
       el("span", { text: humanize(param.name) + (param.required ? " *" : "") }),
       param.description ? helpDot(param.description) : null
     );
-    const field = el("label", { class: `field ${param.kind === "mapping" || param.kind === "aggregations" || param.kind === "any" ? "wide" : ""}` },
+    const field = el("label", { class: `field ${(param.kind === "mapping" || param.kind === "aggregations" || param.kind === "any" || param.kind === "code") ? "wide" : ""}` },
       label,
       control,
       el("small", { text: `${param.kind}${param.description ? " · " + param.description : ""}` })
@@ -2292,6 +2605,391 @@ function startSavedPolling() {
   setInterval(pollSaved, 60000);
 }
 
+/* -- formula bar --------------------------------------------------------- */
+async function runPreview() {
+  const dataset = state.pipeline && state.pipeline.dataset ? state.pipeline.dataset : state.selectedDataset;
+  const query = new URLSearchParams({ limit: "100" });
+  if (dataset) query.set("dataset", dataset);
+  state.run = await api(`/api/v1/run/preview?${query.toString()}`, { method: "POST" });
+  document.getElementById("runPill").hidden = false;
+  document.getElementById("runPill").textContent = `${state.run.run.rows === null ? "?" : state.run.run.rows.toLocaleString()} rows`;
+  document.getElementById("runSummary").textContent = `${state.run.run.rows ?? "?"} rows · ${state.run.schema.columns.length} columns · ${state.run.run.duration_ms.toFixed(1)} ms · cache hits ${state.run.run.cache_hits}/${state.run.run.steps.length}`;
+  document.getElementById("runTable").replaceChildren(buildTable(
+    state.run.schema.columns.map((column) => column.name),
+    state.run.rows,
+    { formats: (state.formats || {})[state.selectedDataset] || [] }
+  ));
+  renderLatestRun();
+  refreshFormulaTargets();
+  refreshPivotFields();
+  refreshPivotValues(pivotValues());
+  toast("Pipeline ran successfully.", "success");
+}
+
+function formulaSchema() {
+  return (state.run && state.run.schema && state.run.schema.columns) || [];
+}
+
+function refreshFormulaTargets() {
+  const columns = formulaSchema();
+  const select = document.getElementById("formulaTarget");
+  if (!select) return;
+  const previous = select.value;
+  select.replaceChildren(el("option", { value: "", text: "＋ New column…" }));
+  for (const column of columns) {
+    select.append(el("option", { value: column.name, text: column.name }));
+  }
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  const enabled = columns.length > 0;
+  for (const id of ["formulaTarget", "formulaInput", "formulaCheck", "formulaApply",
+    "fillDownBtn", "findReplaceBtn", "renameColumnBtn", "castColumnBtn", "dropColumnBtn", "copyTsvBtn"]) {
+    const node = document.getElementById(id);
+    if (node) node.disabled = !enabled;
+  }
+  const pill = document.getElementById("formulaTargetPill");
+  if (pill) pill.textContent = enabled ? `${columns.length} columns` : "Run the pipeline to enable";
+}
+
+function selectedFormulaTarget() {
+  const select = document.getElementById("formulaTarget");
+  return select ? select.value : "";
+}
+
+async function formulaCheck() {
+  const input = document.getElementById("formulaInput");
+  const expression = input.value.trim();
+  if (!expression) {
+    setStatus("formulaStatus", "Type an expression first.", true);
+    return;
+  }
+  const result = await task(
+    () => api("/api/v1/formula/check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expression, use_pipeline: true })
+    }),
+    "formulaStatus",
+    "Expression compiles."
+  );
+  if (!result) return;
+  const badge = document.getElementById("formulaCheckBadge");
+  badge.textContent = `✓ ${result.type}`;
+  badge.className = "badge ok";
+  const sample = (result.sample || []).map((value) => value === null ? "NULL" : String(value)).join(", ");
+  document.getElementById("formulaCheckSample").textContent = sample ? `sample: ${sample}` : "no rows returned";
+  document.getElementById("formulaCheckResult").hidden = false;
+}
+
+async function formulaApply() {
+  const input = document.getElementById("formulaInput");
+  const expression = input.value.trim();
+  if (!expression) {
+    setStatus("formulaStatus", "Type an expression first.", true);
+    return;
+  }
+  const target = selectedFormulaTarget();
+  const params = {
+    column: target || `col_${Date.now().toString(36)}`,
+    expression,
+    replace: Boolean(target)
+  };
+  if (!target) {
+    const suggested = window.prompt("Name the new column", "output");
+    if (suggested === null) return;
+    const name = suggested.trim().replace(/[^A-Za-z0-9_]/g, "_");
+    if (!name) {
+      setStatus("formulaStatus", "Enter a valid column name.", true);
+      return;
+    }
+    params.column = name;
+  }
+  const added = await addPipelineStep("derive", params);
+  if (!added) return;
+  input.value = "";
+  document.getElementById("formulaCheckResult").hidden = true;
+  await runPreview();
+}
+
+async function addPipelineStep(operation, params) {
+  const result = await task(
+    () => api("/api/v1/pipeline/steps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation, params })
+    }),
+    "stepStatus",
+    "Step added."
+  );
+  if (!result) return null;
+  state.pipeline = result.pipeline || result;
+  renderPipeline();
+  return result;
+}
+
+function bindFormulaBar() {
+  const ids = ["formulaTarget", "formulaInput", "formulaCheck", "formulaApply",
+    "fillDownBtn", "findReplaceBtn", "renameColumnBtn", "castColumnBtn", "dropColumnBtn", "copyTsvBtn"];
+  for (const id of ids) {
+    const node = document.getElementById(id);
+    if (!node) continue;
+    node.disabled = true;
+  }
+  document.getElementById("formulaCheck").addEventListener("click", formulaCheck);
+  document.getElementById("formulaInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") formulaApply();
+  });
+  document.getElementById("formulaApply").addEventListener("click", formulaApply);
+  document.getElementById("fillDownBtn").addEventListener("click", async () => {
+    const target = selectedFormulaTarget();
+    if (!target) { setStatus("formulaStatus", "Pick a column first.", true); return; }
+    const added = await addPipelineStep("fill_missing", { columns: [target], method: "ffill" });
+    if (added) await runPreview();
+  });
+  document.getElementById("findReplaceBtn").addEventListener("click", () => {
+    const row = document.getElementById("formulaFindRow");
+    row.hidden = !row.hidden;
+    if (!row.hidden) document.getElementById("formulaFind").focus();
+  });
+  document.getElementById("formulaFindApply").addEventListener("click", async () => {
+    const target = selectedFormulaTarget();
+    if (!target) { setStatus("formulaStatus", "Pick a column first.", true); return; }
+    const find = document.getElementById("formulaFind").value;
+    if (!find) { setStatus("formulaStatus", "Type what to find.", true); return; }
+    const replace = document.getElementById("formulaReplace").value;
+    const added = await addPipelineStep("replace_text", {
+      column: target, pattern: find, replacement: replace, regex: false
+    });
+    if (added) {
+      document.getElementById("formulaFindRow").hidden = true;
+      await runPreview();
+    }
+  });
+  document.getElementById("renameColumnBtn").addEventListener("click", async () => {
+    const target = selectedFormulaTarget();
+    if (!target) { setStatus("formulaStatus", "Pick a column first.", true); return; }
+    const name = window.prompt(`Rename '${target}' to`, target);
+    if (name === null) return;
+    const clean = name.trim();
+    if (!clean || clean === target) return;
+    const added = await addPipelineStep("rename", { columns: { [target]: clean } });
+    if (added) await runPreview();
+  });
+  document.getElementById("castColumnBtn").addEventListener("click", async () => {
+    const target = selectedFormulaTarget();
+    if (!target) { setStatus("formulaStatus", "Pick a column first.", true); return; }
+    const dtype = window.prompt(`Cast '${target}' to (double, integer, string, date, boolean, datetime)`, "double");
+    if (dtype === null) return;
+    const clean = dtype.trim().toLowerCase();
+    if (!clean) return;
+    const added = await addPipelineStep("cast", { column: target, dtype: clean, try_cast: true });
+    if (added) await runPreview();
+  });
+  document.getElementById("dropColumnBtn").addEventListener("click", async () => {
+    const target = selectedFormulaTarget();
+    if (!target) { setStatus("formulaStatus", "Pick a column first.", true); return; }
+    if (!window.confirm(`Drop column '${target}'?`)) return;
+    const added = await addPipelineStep("drop", { columns: [target] });
+    if (added) await runPreview();
+  });
+  document.getElementById("copyTsvBtn").addEventListener("click", async () => {
+    const run = state.run;
+    if (!run || !run.schema) { setStatus("formulaStatus", "Run the pipeline first.", true); return; }
+    const names = run.schema.columns.map((column) => column.name);
+    const lines = [names.join("\t")];
+    for (const row of run.rows) {
+      lines.push(row.map((value) => value === null || value === undefined ? "" : String(value).replace(/\t/g, " ").replace(/\n/g, " ")).join("\t"));
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setStatus("formulaStatus", `Copied ${run.rows.length} row(s) as TSV.`);
+    } catch (error) {
+      setStatus("formulaStatus", `Clipboard unavailable: ${error.message}`, true);
+    }
+  });
+}
+
+/* -- pivot ---------------------------------------------------------------- */
+const PIVOT_AGGREGATION_OPTIONS = [
+  ["sum", "Sum"], ["avg", "Average"], ["count", "Count"], ["count_distinct", "Count distinct"],
+  ["min", "Min"], ["max", "Max"], ["median", "Median"], ["stddev", "Std dev"]
+];
+
+function pivotSchema() {
+  const direct = state.run && state.run.schema && state.run.schema.columns;
+  if (direct && direct.length) return direct;
+  // Fall back to whatever schema is cached from dataset preview loads.
+  return (state.schema && state.schema.columns) || [];
+}
+
+function pivotNumericNames() {
+  return pivotSchema()
+    .filter((column) => ["integer", "bigint", "double", "float", "decimal", "number", "real", "hugeint", "numeric"].some((t) => String(column.dtype).toLowerCase().includes(t)))
+    .map((column) => column.name);
+}
+
+function refreshPivotFields() {
+  const schema = pivotSchema();
+  const rows = document.getElementById("pivotRows");
+  const column = document.getElementById("pivotColumn");
+  if (!rows || !column) return;
+  const previousRows = new Set([...rows.selectedOptions].map((option) => option.value));
+  rows.replaceChildren(...schema.map((column_) => el("option", { value: column_.name, text: `${column_.name} · ${column_.dtype}` })));
+  for (const option of rows.options) {
+    if (previousRows.has(option.value)) option.selected = true;
+  }
+  const previousColumn = column.value;
+  column.replaceChildren(
+    el("option", { value: "", text: "(none — totals only)" }),
+    ...schema.map((column_) => el("option", { value: column_.name, text: `${column_.name} · ${column_.dtype}` }))
+  );
+  if ([...column.options].some((option) => option.value === previousColumn)) column.value = previousColumn;
+  document.getElementById("runPivot").disabled = !schema.length;
+}
+
+function buildPivotValueRow(value) {
+  const base = value || {};
+  const row = el("div", { class: "pivot-value-row" });
+  const schema = pivotSchema();
+  const columnSelect = el("select", { class: "pivot-value-column", "aria-label": "Aggregated column" });
+  columnSelect.append(el("option", { value: "", text: "(count rows)" }));
+  for (const column_ of schema) {
+    columnSelect.append(el("option", { value: column_.name, text: `${column_.name} · ${column_.dtype}` }));
+  }
+  columnSelect.value = base.column || "";
+  const aggregation = selectControl(
+    PIVOT_AGGREGATION_OPTIONS.map(([key]) => key),
+    base.aggregation || "sum",
+    Object.fromEntries(PIVOT_AGGREGATION_OPTIONS)
+  );
+  const label = el("input", { class: "pivot-value-label", placeholder: "Label (optional)", value: base.label || "" });
+  const remove = el("button", { type: "button", class: "btn xs danger", text: "×", "aria-label": "Remove value" });
+  remove.addEventListener("click", () => {
+    row.remove();
+    updatePivotActionState();
+  });
+  aggregation.addEventListener("change", () => {
+    const isCount = aggregation.value === "count";
+    columnSelect.disabled = isCount;
+    if (isCount) columnSelect.value = "";
+  });
+  row.append(columnSelect, aggregation, label, remove);
+  row._collect = () => ({
+    column: aggregation.value === "count" ? null : (columnSelect.value || null),
+    aggregation: aggregation.value,
+    label: label.value.trim() || null
+  });
+  return row;
+}
+
+function refreshPivotValues(initial) {
+  const container = document.getElementById("pivotValueRows");
+  if (!container) return;
+  container.replaceChildren();
+  const values = initial && initial.length ? initial : [{ column: pivotNumericNames()[0] || "", aggregation: "sum", label: null }];
+  for (const value of values) container.append(buildPivotValueRow(value));
+  updatePivotActionState();
+}
+
+function pivotValues() {
+  return [...document.getElementById("pivotValueRows").children]
+    .filter((row) => row._collect)
+    .map((row) => row._collect());
+}
+
+function updatePivotActionState() {
+  const values = pivotValues();
+  const empty = values.length === 0;
+  const incomplete = values.some((value) => value.aggregation !== "count" && !value.column);
+  document.getElementById("runPivot").disabled = empty || incomplete;
+  if (incomplete) setStatus("pivotStatus", "Every value needs a column, or switch it to Count.", true);
+  else if (!empty) setStatus("pivotStatus", "");
+  document.getElementById("copyPivotTsv").disabled = true;
+  document.getElementById("pivotToStep").disabled = true;
+}
+
+function collectPivotQuery() {
+  const rows = [...document.getElementById("pivotRows").selectedOptions].map((option) => option.value);
+  const column = document.getElementById("pivotColumn").value || null;
+  const values = pivotValues();
+  return { rows, columns: column, values, use_pipeline: document.getElementById("pivotUsePipeline").checked };
+}
+
+async function runPivot() {
+  const payload = collectPivotQuery();
+  const result = await task(
+    () => api("/api/v1/pivot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }),
+    "pivotStatus",
+    "Pivot rendered."
+  );
+  if (!result) return;
+  state.pivot = result;
+  document.getElementById("pivotRowCount").textContent = `${result.row_count.toLocaleString()} rows`;
+  document.getElementById("pivotResult").replaceChildren(buildTable(
+    result.columns.map((column) => column.name),
+    result.rows.map((row) => result.columns.map((column) => row[column.name]))
+  ));
+  document.getElementById("copyPivotTsv").disabled = false;
+  const aggregateMap = { sum: "sum", avg: "mean", mean: "mean", count: "count", min: "min", max: "max" };
+  const canStep = result.query.values.length === 1
+    && Boolean(result.query.columns)
+    && result.query.rows.length >= 1
+    && Boolean(result.query.values[0].column)
+    && aggregateMap[result.query.values[0].aggregation] !== undefined;
+  document.getElementById("pivotToStep").disabled = !canStep;
+}
+
+async function copyPivotTsv() {
+  const result = state.pivot;
+  if (!result) return;
+  const names = result.columns.map((column) => column.name);
+  const lines = [names.join("\t")];
+  for (const row of result.rows) {
+    lines.push(names.map((name) => {
+      const value = row[name];
+      return value === null || value === undefined ? "" : String(value).replace(/\t/g, " ").replace(/\n/g, " ");
+    }).join("\t"));
+  }
+  try {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    setStatus("pivotStatus", `Copied ${result.rows.length} row(s) as TSV.`);
+  } catch (error) {
+    setStatus("pivotStatus", `Clipboard unavailable: ${error.message}`, true);
+  }
+}
+
+async function pivotToStep() {
+  const result = state.pivot;
+  if (!result) return;
+  const query = result.query;
+  const value = query.values[0];
+  const map = { sum: "sum", avg: "mean", mean: "mean", count: "count", min: "min", max: "max" };
+  if (!value || query.values.length !== 1) {
+    setStatus("pivotStatus", "Add-to-pipeline needs exactly one value aggregation.", true);
+    return;
+  }
+  if (!query.columns || query.rows.length < 1 || !value.column) {
+    setStatus("pivotStatus", "Add-to-pipeline needs row fields, a pivot column and a value column.", true);
+    return;
+  }
+  const aggregate = map[value.aggregation];
+  if (!aggregate) {
+    setStatus("pivotStatus", `The pipeline pivot step does not support '${value.aggregation}'; use sum, mean, count, min or max.`, true);
+    return;
+  }
+  const params = {
+    index: query.rows.length ? query.rows : [],
+    columns: query.columns,
+    values: value.column || "*",
+    aggregate
+  };
+  const added = await addPipelineStep("pivot", params);
+  if (added) await runPreview();
+}
+
 /* -- export -------------------------------------------------------------- */
 function renderExportContext() {
   const node = document.getElementById("exportContext");
@@ -2503,12 +3201,24 @@ function renderModelSummary() {
   }
   blocks.push(el("details", { class: "model-details" },
     el("summary", { text: `Dimensions (${model.dimensions.length})` }),
-    el("div", { class: "model-list" }, ...model.dimensions.map((item) =>
-      el("div", { class: "model-entry" },
+    el("div", { class: "model-list" }, ...model.dimensions.map((item) => {
+      const grainSelect = el("select", {
+        class: "grain-select",
+        "aria-label": `Grain for ${item.name}`,
+        "data-tip": "Time-intelligence grain: mark this date dimension as a year/quarter/month/week/day axis for running totals and YoY measures"
+      });
+      grainSelect.append(el("option", { value: "", text: "Grain: —" }));
+      for (const grain of ["year", "quarter", "month", "week", "day"]) {
+        grainSelect.append(el("option", { value: grain, text: grain.charAt(0).toUpperCase() + grain.slice(1) }));
+      }
+      grainSelect.value = item.grain || "";
+      grainSelect.addEventListener("change", () => setModelDimensionGrain(item.name, grainSelect.value));
+      return el("div", { class: "model-entry" },
         el("strong", { text: item.name }),
-        el("span", { class: "mono", text: `${item.table}.${item.column}` })
-      )
-    ))
+        el("span", { class: "mono", text: `${item.table}.${item.column}` }),
+        grainSelect
+      );
+    }))
   ));
   blocks.push(el("details", { class: "model-details" },
     el("summary", { text: `Measures (${model.measures.length})` }),
@@ -2520,11 +3230,92 @@ function renderModelSummary() {
       )
     ))
   ));
+  if (model.hierarchies && model.hierarchies.length) {
+    blocks.push(el("details", { class: "model-details" },
+      el("summary", { text: `Hierarchies (${model.hierarchies.length})` }),
+      el("div", { class: "model-list" }, ...model.hierarchies.map((item) =>
+        el("div", { class: "model-entry" },
+          el("strong", { text: item.name }),
+          el("span", { class: "mono", text: (item.levels || []).join(" → ") })
+        )
+      ))
+    ));
+  }
   blocks.push(el("div", { class: "actions" },
     el("button", { class: "btn sm", type: "button", text: "Re-derive", onclick: deriveModel, "data-tip": "Replace the model with a fresh derivation from the recorded schemas" }),
+    el("button", { class: "btn sm", type: "button", text: "Generate calendar", onclick: toggleCalendarBox, "data-tip": "Create a one-row-per-day calendar dataset (year/quarter/month/week dimensions and a Calendar drill hierarchy) for time intelligence" }),
     el("button", { class: "btn sm danger", type: "button", text: "Remove", onclick: removeModel, "data-tip": "Delete models/semantic.json; dashboards stay on disk but stop rendering" })
   ));
+  blocks.push(calendarBox());
   container.replaceChildren(...blocks);
+}
+
+function calendarBox() {
+  const start = el("input", { type: "date", id: "calendarStart", value: "2020-01-01", "aria-label": "First day of the calendar" });
+  const end = el("input", { type: "date", id: "calendarEnd", value: "2030-12-31", "aria-label": "Last day of the calendar" });
+  const rederive = el("input", { type: "checkbox", id: "calendarRederive" });
+  const generate = el("button", { class: "btn primary sm", type: "button", text: "Generate" });
+  generate.addEventListener("click", generateCalendar);
+  return el("div", { class: "calendar-box", id: "calendarBox", hidden: true },
+    el("p", { class: "hint", text: "Creates a calendar dataset with date, year, quarter, month, month_name, year_month, week, day, month/quarter/year starts and a Calendar hierarchy. Join it to facts on date, or let Derive wire the dimensions." }),
+    el("div", { class: "calendar-row" },
+      el("label", {}, el("span", { text: "From" }), start),
+      el("label", {}, el("span", { text: "To" }), end),
+      generate
+    ),
+    el("label", { class: "check" }, rederive, "Re-derive the model afterwards (replaces the current model)")
+  );
+}
+
+function toggleCalendarBox() {
+  const box = document.getElementById("calendarBox");
+  if (box) box.hidden = !box.hidden;
+}
+
+async function generateCalendar() {
+  const start = document.getElementById("calendarStart");
+  const end = document.getElementById("calendarEnd");
+  const rederive = document.getElementById("calendarRederive");
+  if (!start || !end) return;
+  const payload = {
+    start: start.value,
+    end: end.value,
+    overwrite: true,
+    rederive: Boolean(rederive && rederive.checked)
+  };
+  const result = await task(
+    () => api("/api/v1/model/date-table", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }),
+    "dashStatus",
+    "Calendar generated."
+  );
+  if (!result) return;
+  await refreshModel({ quiet: true });
+  await refreshDashboards({ quiet: true });
+  if (result.model) toast(`Calendar created (${result.rows} rows) and the model re-derived.`, "success");
+  else toast(`Calendar created (${result.rows} rows). Re-derive or Generate calendar → Re-derive to wire it up.`, "success");
+}
+
+async function setModelDimensionGrain(name, grain) {
+  const model = JSON.parse(JSON.stringify(state.model || {}));
+  const dimension = (model.dimensions || []).find((item) => item.name === name);
+  if (!dimension) return;
+  dimension.grain = grain || null;
+  const saved = await task(
+    () => api("/api/v1/model", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model })
+    }),
+    "dashStatus",
+    "Grain updated."
+  );
+  if (!saved) return;
+  await refreshModel({ quiet: true });
+  await refreshDashboards({ quiet: true });
 }
 
 async function deriveModel() {
@@ -2714,7 +3505,7 @@ function renderCrossFilterBar() {
   bar.append(el("span", { class: "muted-inline", text: "Cross-filtered by:" }));
   for (const filter of state.crossFilters) {
     const chip = el("span", { class: "cross-chip" },
-      el("span", { text: `${filter.field} = ${formatCell(filter.value)}` }));
+      el("span", {}, `${filter.field} = `, formatCell(filter.value)));
     const remove = el("button", { type: "button", text: "×", "aria-label": `Remove filter ${filter.field}` });
     remove.addEventListener("click", () => toggleCrossFilter(filter.field, filter.value));
     chip.append(remove);
@@ -3129,7 +3920,7 @@ function renderDashboardTile(tileView) {
         const value = coerceDatum(target.getAttribute("data-ds-value"));
         const level = tileView.level || 0;
         const ancestors = (tileView.path || []).map((node) => node.value);
-        if (hierarchy && level < hierarchy.levels.length) {
+        if (hierarchy && level < hierarchy.levels.length - 1) {
           setDrill(tile.id, level + 1, [...ancestors, value]);
           return;
         }
@@ -3429,12 +4220,16 @@ function openDashboardBuilder(dashboardId = null) {
 
   const tileRows = document.getElementById("tileRows");
   const slicerRows = document.getElementById("slicerRows");
+  const parameterRows = document.getElementById("parameterRows");
   tileRows.replaceChildren();
   slicerRows.replaceChildren();
+  parameterRows.replaceChildren();
   const tiles = dashboard ? dashboard.tiles : [];
   const slicers = dashboard ? dashboard.slicers : [];
+  const parameters = dashboard ? (dashboard.parameters || []) : [];
   for (const tile of tiles) tileRows.append(buildTileRow(tile));
   for (const slicer of slicers) slicerRows.append(buildSlicerRow(slicer));
+  for (const parameter of parameters) parameterRows.append(buildParameterRow(parameter));
   if (!tiles.length) tileRows.append(buildTileRow(null));
   if (!slicers.length) slicerRows.append(buildSlicerRow(null));
   showDialog("dashboardDialog");
@@ -3511,10 +4306,23 @@ function buildTileRow(tile) {
   syncOrderOptions();
   if (base.order_by && base.order_by[0]) order.value = base.order_by[0].field;
 
+  const syncHierarchy = () => {
+    const active = Boolean(hierarchy.value);
+    dimensions.disabled = active;
+    if (active) dimensions.selectedIndex = -1;
+    else dimensions.disabled = false;
+  };
+  hierarchy.addEventListener("change", syncHierarchy);
+  syncHierarchy();
+
   const syncKind = () => {
     const isTable = kind.value === "table";
     tableStyle.disabled = !isTable;
     if (!isTable) tableStyle.value = "plain";
+    const isChart = kind.value === "chart";
+    hierarchy.disabled = !isChart;
+    if (!isChart && hierarchy.value) hierarchy.value = "";
+    syncHierarchy();
   };
   kind.addEventListener("change", syncKind);
   syncKind();
@@ -3524,29 +4332,51 @@ function buildTileRow(tile) {
     formField("Kind", kind),
     formField("Chart", chart),
     formField("Width", width),
+    formField("Hierarchy", hierarchy, hierarchies.length
+      ? "Chart only: drill from the outermost level (e.g. year → quarter → month → day). Overrides dimensions."
+      : "No hierarchies in the model. Derive one from a calendar or set one via model JSON."),
     formField("Dimensions", dimensions, "Hold Ctrl to select several; KPI tiles need none."),
     formField("Measures", measures, "Charts and KPIs need at least one; KPI tiles need exactly one."),
     formField("Subtitle", subtitle),
     formField("Sort by", order, "Optional: order rows or categories by one of this tile's fields."),
     formField("Direction", direction),
-    formField("Top N", limit, "Optional row cap. Leave blank for all rows."),
+    formField("Top N", limit, "Optional row cap, a number or a @parameter. Leave blank for all rows."),
     formField("Table style", tableStyle, "Conditional formatting for table tiles only.")
+  ));
+  row.append(el("div", { class: "filter-block" },
+    el("div", { class: "filter-block-head" },
+      el("span", { class: "filter-block-title", text: "Filters" }),
+      addFilter,
+      el("small", { class: "hint", text: "Reference a dashboard parameter with @name (e.g. total_amount >= @min_total)." })
+    ),
+    filterRows
   ));
 
   row._collect = () => {
     const orderField = order.value;
+    const hierarchyValue = hierarchy.value || null;
+    const limitText = limit.value.trim();
+    let parsedLimit = null;
+    if (limitText) {
+      parsedLimit = limitText.startsWith("@") ? limitText
+        : (Number.isFinite(Number(limitText)) && Number(limitText) >= 1 ? Math.floor(Number(limitText)) : NaN);
+      if (parsedLimit !== null && Number.isNaN(parsedLimit)) {
+        throw new Error(`Top N must be a whole number or @parameter; got '${limitText}'.`);
+      }
+    }
     return {
       title: title.value.trim(),
       kind: kind.value,
       chart: chart.value,
       width: Number(width.value),
-      dimensions: selectedValues(dimensions),
+      dimensions: hierarchyValue ? [] : selectedValues(dimensions),
       measures: selectedValues(measures),
       subtitle: subtitle.value.trim(),
-      filters: base.filters || [],
+      filters: [...filterRows.children].map((filterRow) => filterRow._collect()),
       order_by: orderField ? [{ field: orderField, direction: direction.value }] : [],
-      limit: limit.value ? Number(limit.value) : null,
-      table_style: kind.value === "table" ? tableStyle.value : "plain"
+      limit: parsedLimit,
+      table_style: kind.value === "table" ? tableStyle.value : "plain",
+      hierarchy: hierarchyValue
     };
   };
   return row;
@@ -3580,6 +4410,106 @@ function buildSlicerRow(slicer) {
     multi: multi.checked
   });
   return row;
+}
+
+const PARAMETER_TYPES = ["number", "text", "choice", "boolean"];
+const PARAMETER_TYPE_LABELS = { number: "Number", text: "Text", choice: "Choice", boolean: "Yes/No" };
+
+function buildParameterRow(parameter) {
+  const base = parameter || {};
+  const row = el("div", { class: "slicer-row parameter-row" });
+  if (base.name) row.dataset.parameterName = base.name;
+  const head = el("div", { class: "row-head" }, el("strong", { text: base.title || base.name || "New parameter" }));
+  const remove = el("button", { type: "button", class: "btn sm danger", text: "Remove" });
+  remove.addEventListener("click", () => row.remove());
+  head.append(remove);
+  row.append(head);
+
+  const name = el("input", { value: base.name || "", placeholder: "min_total" });
+  const title = el("input", { value: base.title || "", placeholder: "Minimum total (optional)" });
+  const type = selectControl(PARAMETER_TYPES, base.type || "number", PARAMETER_TYPE_LABELS);
+  const numberControls = el("div", { class: "param-num-grid" });
+  const defaultNumber = el("input", { type: "number", step: "any", value: base.default !== undefined && base.default !== null && base.type !== "boolean" && base.type !== "text" ? String(base.default) : "0", placeholder: "Default" });
+  const minimum = el("input", { type: "number", step: "any", value: base.minimum ?? "", placeholder: "Min (optional)" });
+  const maximum = el("input", { type: "number", step: "any", value: base.maximum ?? "", placeholder: "Max (optional)" });
+  numberControls.append(formField("Default", defaultNumber), formField("Min", minimum), formField("Max", maximum));
+  const textControls = el("div", { class: "param-text-grid" });
+  const defaultText = el("input", { value: base.type === "text" && base.default != null ? String(base.default) : "", placeholder: "Default text" });
+  textControls.append(formField("Default", defaultText));
+  const booleanControls = el("div", { class: "param-bool-grid" });
+  const defaultBoolean = selectControl(["true", "false"], base.default === false ? "false" : "true", { true: "Yes", false: "No" });
+  booleanControls.append(formField("Default", defaultBoolean));
+  const choiceControls = el("div", { class: "param-choice-grid" });
+  const options = el("input", { value: (base.options || []).join(", "), placeholder: "Comma-separated options, e.g. North, South, East" });
+  const defaultChoice = el("select");
+  choiceControls.append(formField("Options", options, "Comma-separated; the default is the first option unless changed."), formField("Default", defaultChoice));
+
+  const syncChoiceDefault = () => {
+    const entries = options.value.split(",").map((part) => part.trim()).filter(Boolean);
+    const previous = defaultChoice.value;
+    defaultChoice.replaceChildren(...entries.map((entry) => el("option", { value: entry, text: entry })));
+    defaultChoice.value = entries.includes(previous) ? previous : entries[0] || "";
+  };
+  options.addEventListener("change", syncChoiceDefault);
+  syncChoiceDefault();
+  if (base.default != null && (base.options || []).includes(base.default)) defaultChoice.value = String(base.default);
+
+  const syncType = () => {
+    const value = type.value;
+    numberControls.hidden = value !== "number";
+    textControls.hidden = value !== "text";
+    booleanControls.hidden = value !== "boolean";
+    choiceControls.hidden = value !== "choice";
+  };
+  type.addEventListener("change", syncType);
+  syncType();
+
+  row.append(el("div", { class: "form-grid" },
+    formField("Name", name, "Letters, digits, underscore; referenced as @name."),
+    formField("Label", title, "Optional, shown to viewers."),
+    formField("Type", type)
+  ));
+  row.append(numberControls, textControls, booleanControls, choiceControls);
+
+  row._collect = () => {
+    const trimmed = name.value.trim();
+    if (!trimmed) throw new Error("Every parameter needs a name.");
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(trimmed)) {
+      throw new Error(`Parameter '${trimmed}' must start with a letter or underscore and use only letters, digits and underscores.`);
+    }
+    const kind = type.value;
+    const titleText = title.value.trim() || null;
+    if (kind === "number") {
+      const payload = { name: trimmed, type: kind, title: titleText, default: defaultNumber.value === "" ? 0 : Number(defaultNumber.value) };
+      if (minimum.value.trim()) payload.minimum = Number(minimum.value);
+      if (maximum.value.trim()) payload.maximum = Number(maximum.value);
+      return payload;
+    }
+    if (kind === "text") return { name: trimmed, type: kind, title: titleText, default: defaultText.value };
+    if (kind === "boolean") return { name: trimmed, type: kind, title: titleText, default: defaultBoolean.value === "true" };
+    const entries = options.value.split(",").map((part) => part.trim()).filter(Boolean);
+    if (!entries.length) throw new Error(`Parameter '${trimmed}' needs at least one option.`);
+    const chosen = defaultChoice.value || entries[0];
+    if (!entries.includes(chosen)) throw new Error(`Parameter '${trimmed}' default must be one of its options.`);
+    return { name: trimmed, type: kind, title: titleText, default: chosen, options: entries };
+  };
+  return row;
+}
+
+function collectParameterRows() {
+  const rows = [...document.getElementById("parameterRows").children];
+  const used = new Set();
+  const parameters = [];
+  for (const row of rows) {
+    if (!row._collect) continue;
+    const parameter = row._collect();
+    if (used.has(parameter.name)) {
+      throw new Error(`Parameter '${parameter.name}' is defined twice.`);
+    }
+    used.add(parameter.name);
+    parameters.push(parameter);
+  }
+  return parameters;
 }
 
 function collectTiles() {
@@ -3626,9 +4556,11 @@ async function submitDashboard(event) {
   }
   let tiles;
   let slicers;
+  let parameters;
   try {
     tiles = collectTiles();
     slicers = collectSlicers();
+    parameters = collectParameterRows();
   } catch (error) {
     setStatus("dashboardFormStatus", error.message, true);
     return;
@@ -3638,6 +4570,7 @@ async function submitDashboard(event) {
     description: document.getElementById("dashboardDescription").value.trim(),
     tiles,
     slicers,
+    parameters,
     overwrite: true
   };
   const existing = state.dashboardDraft;
@@ -3649,6 +4582,9 @@ async function submitDashboard(event) {
     if (payload.bookmarks.length !== (draft.bookmarks || []).length) {
       toast("Removed saved views that referenced deleted slicers.");
     }
+    // Preserve refresh settings the builder does not edit.
+    payload.schedule = draft.schedule;
+    payload.report_path = draft.report_path;
   }
   const saved = await task(
     () => existing
@@ -3818,21 +4754,11 @@ function bindEvents() {
     toast("Last step undone.");
   }, "stepStatus", ""));
 
-  document.getElementById("runPipeline").addEventListener("click", () => task(async () => {
-    const dataset = state.pipeline && state.pipeline.dataset ? state.pipeline.dataset : state.selectedDataset;
-    const query = new URLSearchParams({ limit: "100" });
-    if (dataset) query.set("dataset", dataset);
-    state.run = await api(`/api/v1/run/preview?${query.toString()}`, { method: "POST" });
-    document.getElementById("runPill").hidden = false;
-    document.getElementById("runPill").textContent = `${state.run.run.rows === null ? "?" : state.run.run.rows.toLocaleString()} rows`;
-    document.getElementById("runSummary").textContent = `${state.run.run.rows ?? "?"} rows · ${state.run.schema.columns.length} columns · ${state.run.run.duration_ms.toFixed(1)} ms · cache hits ${state.run.run.cache_hits}/${state.run.run.steps.length}`;
-    document.getElementById("runTable").replaceChildren(buildTable(
-      state.run.schema.columns.map((column) => column.name),
-      state.run.rows
-    ));
-    renderLatestRun();
-    toast("Pipeline ran successfully.", "success");
-  }, "runStatus", "Pipeline ran successfully."));
+  bindFormulaBar();
+
+  document.getElementById("runPipeline").addEventListener("click", () => task(
+    () => runPreview(), "runStatus", "Pipeline ran successfully."
+  ));
 
   document.getElementById("runAnalysis").addEventListener("click", runAnalysis);
   document.getElementById("analysisSearch").addEventListener("input", (event) => {
@@ -3863,6 +4789,21 @@ function bindEvents() {
     const base = input.value.trim().replace(/\.[^./\\]+$/, "") || "exports/clean";
     input.value = `${base}.${format}`;
   });
+
+  document.getElementById("addPivotValue").addEventListener("click", () => {
+    document.getElementById("pivotValueRows").append(
+      buildPivotValueRow({ column: pivotNumericNames()[0] || "", aggregation: "sum", label: null })
+    );
+    updatePivotActionState();
+  });
+  document.getElementById("formatKind").addEventListener("change", syncFormatControls);
+  document.getElementById("formatOp").addEventListener("change", syncFormatControls);
+  document.getElementById("formatAdd").addEventListener("click", addFormatRule);
+  syncFormatControls();
+  document.getElementById("runPivot").addEventListener("click", runPivot);
+  document.getElementById("copyPivotTsv").addEventListener("click", copyPivotTsv);
+  document.getElementById("pivotToStep").addEventListener("click", pivotToStep);
+  document.getElementById("pivotUsePipeline").addEventListener("change", () => { state.pivot = null; });
 
   document.getElementById("newDashboard").addEventListener("click", () => openDashboardBuilder());
   document.getElementById("editDashboard").addEventListener("click", () => {
@@ -3918,6 +4859,9 @@ function bindEvents() {
   document.getElementById("addSlicer").addEventListener("click", () => {
     document.getElementById("slicerRows").append(buildSlicerRow(null));
   });
+  document.getElementById("addParameter").addEventListener("click", () => {
+    document.getElementById("parameterRows").append(buildParameterRow(null));
+  });
 
   document.querySelectorAll("dialog.dialog").forEach((dialog) => {
     dialog.addEventListener("click", (event) => {
@@ -3942,7 +4886,71 @@ function bindEvents() {
 }
 
 /* -- table renderer ------------------------------------------------------ */
-function buildTable(columns, rows) {
+const FMT_COLORS = ["red", "amber", "green", "blue"];
+
+function formatsByColumn(rules) {
+  const map = {};
+  for (const rule of rules || []) {
+    const list = map[rule.column] || (map[rule.column] = []);
+    list.push(rule);
+  }
+  return map;
+}
+
+function compareValues(a, op, b) {
+  const x = Number(a);
+  const y = Number(b);
+  if (Number.isNaN(x) || Number.isNaN(y)) return false;
+  if (op === ">") return x > y;
+  if (op === ">=") return x >= y;
+  if (op === "<") return x < y;
+  if (op === "<=") return x <= y;
+  if (op === "=") return x === y;
+  if (op === "!=") return x !== y;
+  return false;
+}
+
+function cellMatchesRule(value, rule) {
+  if (rule.kind !== "highlight") return false;
+  const op = rule.op;
+  if (op === "between") {
+    return compareValues(value, ">=", rule.value) && compareValues(value, "<=", rule.value2);
+  }
+  return compareValues(value, op, rule.value);
+}
+
+function applyFormatsToCell(td, value, columnRules, range) {
+  for (const rule of columnRules || []) {
+    if (rule.kind === "data_bars" && range && range.max > range.min && typeof value === "number") {
+      const pct = ((value - range.min) / (range.max - range.min)) * 100;
+      td.classList.add("fmt-bar");
+      td.style.setProperty("--pct", `${pct.toFixed(1)}%`);
+    } else if (rule.kind === "heatmap" && range && range.max >= range.min && typeof value === "number") {
+      const span = range.max - range.min;
+      const alpha = span > 0 ? 0.06 + 0.34 * ((value - range.min) / span) : 0.06;
+      td.classList.add("fmt-heat");
+      td.style.setProperty("--heat", alpha.toFixed(3));
+    } else if (rule.kind === "highlight" && cellMatchesRule(value, rule)) {
+      td.classList.add(`fmt-${rule.color}`);
+    }
+  }
+}
+
+function numericRange(rows, columnIndex) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const row of rows) {
+    const value = row[columnIndex];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+  }
+  return Number.isFinite(min) ? { min, max } : null;
+}
+
+function buildTable(columns, rows, options) {
+  const formats = formatsByColumn(options && options.formats);
   const wrap = el("div", { class: "table-wrap" });
   if (!columns || !columns.length) {
     wrap.append(el("p", { class: "empty", text: "No columns." }));
@@ -3951,18 +4959,25 @@ function buildTable(columns, rows) {
   const table = el("table");
   const head = el("thead");
   const headRow = el("tr");
-  for (const column of columns) headRow.append(el("th", { text: column }));
+  columns.forEach((column, index) => {
+    const th = el("th", { text: column });
+    if (formats[column]) th.setAttribute("data-tip", "Formatted");
+    headRow.append(th);
+  });
   head.append(headRow);
   const body = el("tbody");
   if (!rows || !rows.length) {
     body.append(el("tr", {}, el("td", { colspan: String(columns.length), class: "empty", text: "No rows." })));
   } else {
+    const ranges = columns.map((_, index) => numericRange(rows, index));
     for (const row of rows) {
       const tr = el("tr");
-      for (const value of row) {
+      row.forEach((value, index) => {
         const numeric = typeof value === "number";
-        tr.append(el("td", { class: numeric ? "num" : "" }, formatCell(value)));
-      }
+        const td = el("td", { class: numeric ? "num" : "" }, formatCell(value));
+        applyFormatsToCell(td, value, formats[columns[index]], ranges[index]);
+        tr.append(td);
+      });
       body.append(tr);
     }
   }

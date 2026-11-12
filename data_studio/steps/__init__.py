@@ -6,7 +6,7 @@ pure compilers: they validate parameters and return a new lazy `DuckDBTable`.
 
 from __future__ import annotations
 
-from . import aggregate, clean, datetime_steps, join, reshape, sample, text, transform, window
+from . import aggregate, clean, code, datetime_steps, join, reshape, sample, text, transform, window
 from .registry import (
     StepContext,
     StepDefinition,
@@ -31,6 +31,7 @@ def build_registry() -> StepRegistry:
         reshape,
         window,
         sample,
+        code,
     ):
         definitions.extend(module.STEPS)
     return StepRegistry(definitions)

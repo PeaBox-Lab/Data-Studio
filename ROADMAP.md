@@ -11,6 +11,8 @@ The goal is one local-first app that anyone can open without training: **import 
 | 0.3 | Done | **Statistics** — t-test, ANOVA, chi-square, proportion test, linear & logistic regression, time-series (summary, trend, decomposition, ARIMA) — all exposed on the Analyze screen |
 | 0.4 | Done | **Process** — real data processing steps: filter, cast, rename, derive, pivot, unpivot, group & aggregate, dates, window functions, rolling operations, sampling |
 | 0.5 | Done | **Reports** — Save analysis results as standalone HTML reports from the Analyze screen |
+| 0.6 | Done | **Workspace dashboards** — calendar & time intelligence (running total, YoY), drill-down + cross-filter, what-if parameters, scheduled dashboard refresh |
+| 0.7 | Done | **Phase 4** — formula bar (typed DSL, fill down, find/replace, TSV copy), Pivot view (rows/values/columns with per-value aggregations), conditional formatting (data bars, heatmap, highlight) persisted per dataset, desktop validation lists, Python/R code steps, and reproducible script export (Python or R) |
 
 ## Phase 0.2 — Analyze (done)
 
@@ -73,6 +75,28 @@ Not exposed (requires a second dataset in project mode): join, union.
 - Enabled after running an analysis; captures the last `AnalysisResult`.
 - Uses the existing kernel report renderer (`data_studio.reporting.write_html_report`) to emit a self-contained HTML document with the result narrative, metrics, diagnostics, tables and provenance.
 - File is saved with a suggested name based on the analysis kind and the user chooses the destination.
+
+## Phase 0.6 — Workspace dashboards (done)
+
+**Problem:** Dashboards could KPI/chart/table with slicers and saved views, but every time-intelligence question ("how are we tracking YoY?") needed manual exports, parameters were re-hardcoded per tile, and nobody could tell whether a dashboard was stale.
+
+**What was built:**
+- `data-studio date-table` (or the Dashboards → Model panel) generates a one-row-per-day **calendar dataset**; deriving the model afterwards yields grain-tagged date dimensions (`year`/`quarter`/`month`/`week`/`day`) and a `Calendar` hierarchy (year → quarter → month → day). Grain can also be edited per dimension in the model panel.
+- Measures can wrap one aggregate with **time intelligence**: `running_total(sum(amount))`, `yoy(sum(amount))`, `yoy_pct(sum(amount))`, ordered by the grain-marked dimension the query groups by.
+- Dashboards are interactive: chart marks and table rows **cross-filter** every tile (chips show what's active), hierarchy tiles **drill** year → quarter → month → day with breadcrumbs, and each tile has a **SQL** button showing dimensions, measures, elapsed time and compiled SQL.
+- **What-if parameters** (number/text/choice/bool) are declared on the dashboard and referenced as `@name` in tile filters and row caps; viewers change them in the parameter bar and tiles re-query live. The builder has a parameter repeater and per-tile filter rows.
+- Dashboards now carry a **schedule** (`manual`/`on_open`/`hourly`/`daily`) and an input fingerprint; `data-studio refresh --due`, the workspace timer and project open refresh due dashboards alongside saved analyses, with fresh/stale badges and an optional HTML artifact under `reports/`.
+
+## Phase 0.7 — Phase 4: Excel-like editing and scripting (done)
+
+**Problem:** the workspace could clean (pipeline) and chart (dashboards), but a working analyst still had to round-trip through Excel for ad-hoc derived columns, quick pivot cross-tabs, colour-coded cells and throwaway scripts — nothing a routine workbook replacement would accept.
+
+**What was built:**
+- **Formula bar** in Prepare — typed DSL expressions with live checks (`round(amount * 1.2, 2)`), target picker (replace a column or create one), apply-and-rerun, plus fill down, find &amp; replace, rename, cast, drop and copy-as-TSV quick actions.
+- **Pivot view** — rows, an optional single pivot column and any number of value aggregations (sum, average, count, distinct count, min, max, median, stddev), server-side as one DuckDB conditional-aggregate query; copy as TSV or promote a single-value pivot to the pipeline.
+- **Conditional formatting** per dataset, stored in the project (`formats/<dataset>.json`): data bars, heatmap and highlight (six operators, four colours); every grid freezes the header and first column. The desktop app gained **validation lists** (dropdown-only editing with rejected out-of-list values).
+- **Python / R code step** — trusted local script executes on the table mid-pipeline with declared input/output Parquet paths, timeout kill and captured stderr/stdout on failure.
+- **Script export** — `data-studio script .\project --format python|r [--output PATH]` writes a standalone reproducible pipeline (SQL steps verbatim with project-relative paths; code steps inlined).
 
 ## Later (optional)
 

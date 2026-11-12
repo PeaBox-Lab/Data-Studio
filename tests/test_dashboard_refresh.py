@@ -15,7 +15,6 @@ from data_studio.io.sniff import CsvOptions
 from data_studio.project.store import Project
 from data_studio.semantic import (
     SemanticDimension,
-    SemanticMeasure,
     SemanticModel,
     SemanticModelStore,
     SemanticTable,
@@ -58,7 +57,7 @@ def _dashboard(schedule: str = "daily", report: bool = False) -> Dashboard:
             ),
         ),
         schedule=schedule,
-        report_path=f"reports/dashboard-refresh-demo.html" if report else None,
+        report_path="reports/dashboard-refresh-demo.html" if report else None,
     )
 
 
@@ -181,7 +180,7 @@ def test_refresh_reports_broken_dashboard(
     project: Project, model: SemanticModel
 ) -> None:
     store = DashboardStore(project)
-    saved = store.save(_dashboard(), model=model, overwrite=True)
+    store.save(_dashboard(), model=model, overwrite=True)
     # Replace the model with one that no longer defines the KPI's measure.
     slim = SemanticModel(
         name="Slim",
@@ -279,6 +278,37 @@ def test_cli_date_table(
     payload = json.loads(capsys.readouterr().out)
     assert payload["dataset"] == "calendar"
     assert payload["rows"] == 365
+
+
+def test_api_date_table_endpoint(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from fastapi.testclient import TestClient
+
+    from data_studio.api.app import create_app
+    from data_studio.api.state import ProjectManager
+
+    manager = ProjectManager()
+    root = tmp_path / "ApiCalendar"
+    with TestClient(create_app(manager=manager)) as client:
+        created = client.post(
+            "/api/v1/project/create", json={"path": str(root), "name": "Cal"}
+        )
+        assert created.status_code == 200, created.text
+        response = client.post(
+            "/api/v1/model/date-table",
+            json={"start": "2023-01-01", "end": "2023-12-31"},
+        )
+        assert response.status_code == 201, response.text
+        payload = response.json()
+        assert payload["dataset"] == "calendar"
+        assert payload["rows"] == 365
+        bad = client.post(
+            "/api/v1/model/date-table",
+            json={"start": "not-a-date", "end": "2023-12-31"},
+        )
+        assert bad.status_code == 400
+    manager.close()
 
 
 def test_dashboard_describe_reports_missing_model(

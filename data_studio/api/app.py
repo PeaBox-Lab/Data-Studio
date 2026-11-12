@@ -42,13 +42,16 @@ from ..dashboard import (
     write_dashboard_report,
 )
 from ..engine.duckdb_engine import EngineError
+from ..formats import FormatError, FormatRule, load_formats, save_formats
 from ..kernel.chart_render import DEFAULT_HEIGHT, DEFAULT_WIDTH, render_chart
 from ..kernel.spec import ChartSpec
 from ..pipeline import Pipeline, PipelineRunError, make_step
 from ..pipeline.runner import PipelineRunner
+from ..pivot import PivotQuery, pivot_query
 from ..project.manifest import safe_project_path
 from ..project.store import Project, ProjectError
 from ..reporting import write_html_report
+from ..script import SCRIPT_FORMATS, generate_script
 from ..semantic import (
     CalendarError,
     SemanticEngine,
@@ -58,6 +61,7 @@ from ..semantic import (
     generate_calendar,
 )
 from ..steps import DEFAULT_REGISTRY
+from ..steps.expr import compile_expression
 from ..steps.registry import StepError, UnknownStepError
 from ..version import API_VERSION, PROJECT_FORMAT_VERSION, __version__
 from .state import NoProjectError, ProjectManager
@@ -343,6 +347,27 @@ def create_app(
             "rows": [list(row) for row in data.rows],
         }
 
+    @app.get("/api/v1/datasets/{dataset_id}/format", tags=["datasets"])
+    def get_dataset_format(dataset_id: str) -> dict[str, Any]:
+        project().dataset_entry(dataset_id)  # 404s for unknown datasets
+        rules = load_formats(project(), dataset_id)
+        return {"rules": [rule.to_dict() for rule in rules]}
+
+    @app.put("/api/v1/datasets/{dataset_id}/format", tags=["datasets"])
+    def put_dataset_format(dataset_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = payload.get("rules")
+        if raw is None or not isinstance(raw, list):
+            raise ValueError("A 'rules' list is required.")
+        try:
+            rules = save_formats(
+                project(),
+                dataset_id,
+                [FormatRule.from_dict(item) for item in raw],
+            )
+        except FormatError as exc:
+            raise ValueError(str(exc)) from exc
+        return {"rules": [rule.to_dict() for rule in rules]}
+
     # -- steps and pipeline ------------------------------------------------
 
     @app.get("/api/v1/operations", tags=["pipeline"])
@@ -447,6 +472,97 @@ def create_app(
             "rows": result.rows,
             "schema": result.schema.to_dict(),
         }
+
+    @app.post("/api/v1/script", tags=["pipeline"])
+    def export_script(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A script request object is required.")
+        fmt = str(payload.get("format", "python")).strip().lower()
+        if fmt not in SCRIPT_FORMATS:
+            raise ValueError("Script 'format' must be 'python' or 'r'.")
+        script = generate_script(project(), fmt=fmt)
+        destination = payload.get("destination")
+        written = None
+        if destination is not None:
+            if not isinstance(destination, str) or not destination.strip():
+                raise ValueError("'destination' must be a non-empty string.")
+            path = Path(destination)
+            if not path.is_absolute():
+                path = safe_project_path(
+                    project().root, destination.replace("\\", "/")
+                )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(script, encoding="utf-8", newline="\n")
+            written = str(path)
+        return {"script": script, "format": fmt, "destination": written}
+
+    # -- formula and pivot ----------------------------------------------------
+
+    @app.post("/api/v1/formula/check", tags=["pipeline"])
+    def check_formula(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A formula check object is required.")
+        expression = payload.get("expression")
+        if not isinstance(expression, str) or not expression.strip():
+            raise ValueError("A non-empty 'expression' string is required.")
+        dataset = payload.get("dataset")
+        if dataset is not None and not isinstance(dataset, str):
+            raise ValueError("'dataset' must be a string or null.")
+        use_pipeline = bool(payload.get("use_pipeline", True))
+        active = project()
+        if use_pipeline:
+            table = active.run_pipeline(dataset_id=dataset, count_rows=False).table
+        else:
+            target = dataset or active.manifest.active_dataset
+            if not target:
+                raise ValueError("The project has no active dataset.")
+            table = active.dataset_table(target)
+        compiled = compile_expression(expression, table.schema)
+        try:
+            describe_rows = active.engine.query(
+                f"DESCRIBE SELECT ({compiled}) AS __formula__ "
+                f"FROM ({table.sql}) AS _src LIMIT 0"
+            )
+            sample_rows = active.engine.query(
+                f"SELECT ({compiled}) AS __formula__ "
+                f"FROM ({table.sql}) AS _src LIMIT 5"
+            )
+        except Exception as exc:
+            raise ValueError(f"Expression does not compile or run: {exc}") from exc
+        column_type = str(describe_rows[0][1]) if describe_rows else "unknown"
+        sample: list[Any] = []
+        for row in sample_rows:
+            value = row[0] if row else None
+            if value is None or isinstance(value, (bool, int, float, str)):
+                sample.append(value)
+            else:
+                sample.append(str(value))
+        return {
+            "ok": True,
+            "expression": expression.strip(),
+            "sql": compiled,
+            "type": column_type,
+            "sample": sample,
+        }
+
+    @app.post("/api/v1/pivot", tags=["pivot"])
+    def run_pivot(payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("A pivot request object is required.")
+        dataset = payload.get("dataset")
+        if dataset is not None and not isinstance(dataset, str):
+            raise ValueError("'dataset' must be a string or null.")
+        use_pipeline = bool(payload.get("use_pipeline", True))
+        active = project()
+        if use_pipeline:
+            table = active.run_pipeline(dataset_id=dataset, count_rows=False).table
+        else:
+            target = dataset or active.manifest.active_dataset
+            if not target:
+                raise ValueError("The project has no active dataset.")
+            table = active.dataset_table(target)
+        query = PivotQuery.from_dict(payload.get("query", payload))
+        return pivot_query(active.engine, table, query).to_dict()
 
     # -- analyses ----------------------------------------------------------
 

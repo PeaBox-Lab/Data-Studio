@@ -10,8 +10,8 @@ import pytest
 from data_studio.io.sniff import CsvOptions
 from data_studio.project.store import Project
 from data_studio.semantic import (
-    GRAINS,
     GRAIN_PERIODS,
+    GRAINS,
     QueryOrder,
     Relationship,
     SemanticDimension,
@@ -225,7 +225,9 @@ def test_time_intelligence_end_to_end(calendar_project: Project) -> None:
         if row["month"] <= "2023-03-01"
     ]
     assert running == sorted(running)
-    assert running[-1] == pytest.approx(amounts["2023-01-15"] + amounts["2023-02-15"] + amounts["2023-03-15"])
+    assert running[-1] == pytest.approx(
+        amounts["2023-01-15"] + amounts["2023-02-15"] + amounts["2023-03-15"]
+    )
 
 
 def test_time_intelligence_requires_grain(

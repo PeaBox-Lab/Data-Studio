@@ -16,8 +16,8 @@ from data_studio.dashboard import (
 )
 from data_studio.io.sniff import CsvOptions
 from data_studio.project.store import Project
-from data_studio.semantic import QueryFilter
 from data_studio.semantic import (
+    QueryFilter,
     SemanticDimension,
     SemanticEngine,
     SemanticMeasure,

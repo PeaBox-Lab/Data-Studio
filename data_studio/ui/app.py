@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from PySide6.QtCore import QAbstractTableModel, QByteArray, QSettings, Qt
+from PySide6.QtCore import QAbstractTableModel, QByteArray, QSettings, Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QStackedWidget,
+    QStyledItemDelegate,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -81,12 +82,32 @@ QStatusBar { background: #ffffff; border-top: 1px solid #e2e5ec; }
 
 
 class DataFrameModel(QAbstractTableModel):
-    """Editable table model - missing values are highlighted amber."""
+    """Editable table model - missing values are highlighted amber.
+
+    Columns may carry a validation list (a small set of allowed values). Cells in
+    those columns are edited through a dropdown that only offers valid entries, and
+    any out-of-list value is rejected with a message in the status bar.
+    """
+
+    rejected = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
         self._df = pd.DataFrame()
         self._visible = []
+        self.validation_lists: dict[str, list[str]] = {}
+
+    def column_names(self) -> list[str]:
+        return list(self._df.columns)
+
+    def validation_for(self, column: str) -> list[str]:
+        return self.validation_lists.get(column, [])
+
+    def set_validation(self, column: str, values: list[str] | None) -> None:
+        if values:
+            self.validation_lists[column] = list(dict.fromkeys(str(v) for v in values))
+        else:
+            self.validation_lists.pop(column, None)
 
     def set_frame(self, df: pd.DataFrame) -> None:
         self.beginResetModel()
@@ -136,6 +157,13 @@ class DataFrameModel(QAbstractTableModel):
             return False
         row = self._visible[index.row()]
         column = self._df.columns[index.column()]
+        allowed = self.validation_lists.get(column)
+        text = str(value).strip()
+        if allowed is not None and text.lower() not in {item.lower() for item in allowed}:
+            self.rejected.emit(
+                f"'{text}' is not allowed in {column}; pick one of: {', '.join(allowed)}"
+            )
+            return False
         try:
             if pd.api.types.is_numeric_dtype(self._df[column]):
                 value = float("nan") if str(value).strip() == "" else float(value)
@@ -164,6 +192,39 @@ def heading(title: str, hint: str) -> tuple[QVBoxLayout, None]:
     layout.addWidget(title_label)
     layout.addWidget(hint_label)
     return layout, None
+
+
+class ValidationDelegate(QStyledItemDelegate):
+    """Dropdown editor for columns with a validation list."""
+
+    def __init__(self, model: DataFrameModel, parent=None) -> None:
+        super().__init__(parent)
+        self._model = model
+
+    def createEditor(self, parent, option, index):
+        column = self._model.column_names()[index.column()]
+        values = self._model.validation_for(column)
+        if values:
+            editor = QComboBox(parent)
+            editor.addItems(values)
+            return editor
+        return super().createEditor(parent, option, index)
+
+    def setEditorData(self, editor, index):
+        column = self._model.column_names()[index.column()]
+        values = self._model.validation_for(column)
+        if values and isinstance(editor, QComboBox):
+            text = str(index.data(Qt.EditRole) or "")
+            position = editor.findText(text, Qt.MatchFixedString)
+            editor.setCurrentIndex(position if position >= 0 else 0)
+            return
+        super().setEditorData(editor, index)
+
+    def setModelData(self, editor, model, index):
+        if isinstance(editor, QComboBox):
+            model.setData(index, editor.currentText(), Qt.EditRole)
+            return
+        super().setModelData(editor, model, index)
 
 
 class MainWindow(QMainWindow):
@@ -273,6 +334,7 @@ class MainWindow(QMainWindow):
         self, df: pd.DataFrame, name: str, remember: bool = True, announce: bool = True
     ) -> None:
         self.model.set_frame(df)
+        self._apply_validation_delegates()
         self.undo_stack.clear()
         self.history.clear()
         self.current_file = Path(name) if remember and Path(name).suffix else None
@@ -290,6 +352,7 @@ class MainWindow(QMainWindow):
     def apply_change(self, df: pd.DataFrame, description: str) -> None:
         self.undo_stack.append((self.current_frame(), description))
         self.model.set_frame(df)
+        self._apply_validation_delegates()
         self.history.addItem(f"- {description}")
         self._refresh_counts()
         self._refresh_columns()
@@ -301,6 +364,7 @@ class MainWindow(QMainWindow):
             return
         frame, description = self.undo_stack.pop()
         self.model.set_frame(frame)
+        self._apply_validation_delegates()
         self.history.addItem(f"- Undid: {description}")
         self._refresh_counts()
         self._refresh_columns()
@@ -441,30 +505,113 @@ class MainWindow(QMainWindow):
         save_button = QPushButton("Save a copy…")
         save_button.setToolTip("Save the current table as CSV, Excel or Parquet")
         save_button.clicked.connect(self.save_file)
+        lists_button = QPushButton("Lists…")
+        lists_button.setToolTip(
+            "Restrict a column to a set of allowed values "
+            "(e.g. region = North, South, East)"
+        )
+        lists_button.clicked.connect(self._validation_lists_dialog)
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search all columns…")
         self.search_box.setToolTip("Type to filter rows; clear to see everything again")
         self.search_box.textChanged.connect(lambda text: self.model.set_filter(text))
-        for widget in (open_button, sample_button, save_button):
+        for widget in (open_button, sample_button, save_button, lists_button):
             toolbar.addWidget(widget)
         toolbar.addStretch(1)
         toolbar.addWidget(self.search_box)
         layout.addLayout(toolbar)
 
         self.model = DataFrameModel()
+        self.model.rejected.connect(self._validation_rejected)
         self.view = QTableView()
         self.view.setModel(self.model)
         self.view.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.view.setAlternatingRowColors(True)
         self.view.setToolTip(
-            "Edit cells directly - changes stay in this window only until you save a copy"
+            "Edit cells directly - headers stay pinned while you scroll.\n"
+            "Changes stay in this window only until you save a copy"
         )
+        self.validation_delegate = ValidationDelegate(self.model, self.view)
         layout.addWidget(self.view, 1)
 
         self.table_stats = QLabel()
         self.table_stats.setObjectName("pageHint")
         layout.addWidget(self.table_stats)
         return page
+
+    def _validation_rejected(self, message: str) -> None:
+        self.statusBar().showMessage(message, 8000)
+
+    def _apply_validation_delegates(self) -> None:
+        names = self.model.column_names()
+        for index, column in enumerate(names):
+            if self.model.validation_for(column):
+                self.view.setItemDelegateForColumn(index, self.validation_delegate)
+            else:
+                self.view.setItemDelegateForColumn(index, None)
+
+    def _validation_lists_dialog(self) -> None:
+        names = self.model.column_names()
+        if not names:
+            QMessageBox.information(self, "Lists", "Open a file first.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Validation lists")
+        dialog.setMinimumWidth(380)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(
+            "Pick a column and the values it may contain. Cells in that column\n"
+            "then edit through a dropdown, and anything else is rejected."
+        ))
+        column_combo = QComboBox()
+        column_combo.addItems(names)
+        layout.addWidget(column_combo)
+
+        values_input = QLineEdit()
+        values_input.setPlaceholderText("North, South, East, West")
+        layout.addWidget(values_input)
+
+        hint = QLabel("Comma-separated values. Leave empty to clear the list for the column.")
+        hint.setObjectName("pageHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        def load_current(*_args: object) -> None:
+            current = self.model.validation_for(column_combo.currentText())
+            values_input.setText(", ".join(current))
+
+        column_combo.currentTextChanged.connect(load_current)
+        load_current()
+
+        buttons = QHBoxLayout()
+        clear_button = QPushButton("Clear")
+        clear_button.clicked.connect(lambda: (values_input.setText(""), accept()))
+        apply_button = QPushButton("OK")
+        apply_button.setObjectName("primary")
+        apply_button.clicked.connect(lambda: accept())
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(dialog.reject)
+        buttons.addWidget(clear_button)
+        buttons.addStretch(1)
+        buttons.addWidget(cancel_button)
+        buttons.addWidget(apply_button)
+        layout.addLayout(buttons)
+
+        def accept() -> None:
+            column = column_combo.currentText()
+            raw = values_input.text().strip()
+            values = [part.strip() for part in raw.split(",") if part.strip()]
+            self.model.set_validation(column, values or None)
+            self._apply_validation_delegates()
+            if values:
+                self.statusBar().showMessage(
+                    f"{column} now only accepts: {', '.join(values)}", 6000
+                )
+            else:
+                self.statusBar().showMessage(f"Validation list cleared for {column}.", 6000)
+            dialog.accept()
+
+        dialog.exec()
 
     def _clean_page(self) -> QWidget:
         page = QWidget()

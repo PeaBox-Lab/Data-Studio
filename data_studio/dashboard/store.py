@@ -314,7 +314,6 @@ class DashboardStore:
         """
 
         from ..semantic.engine import SemanticEngine
-        from ..semantic.store import SemanticModelStore
         from .render import DashboardRenderer
 
         dashboard = self.get(dashboard_id)
